@@ -1,14 +1,53 @@
 @page "/about"
+@using System.Reflection
+@inject ClaudeWorkbench.Host.Services.WorkspaceManager Workspace
+@inject ClaudeWorkbench.Host.Services.SidecarOptions Sidecar
+@inject NavigationManager Nav
 
-@*  Fun "About" page — just the poster, centered full-screen. Self-contained (this one
-    file + wwwroot/images/about-poster.png). To disable later: delete this file and
-    remove the "About" link in Home.razor. Classes are ab- prefixed so nothing leaks.  *@
+@*  About: what this install is and where everything lives. Self-contained (one file,
+    ab- prefixed styles so nothing leaks). *@
+
+<PageTitle>About — ClaudeWorkbench --Basic</PageTitle>
 
 <div class="ab-root">
-    <a class="ab-back" href="/">&larr;&nbsp;Workbench</a>
-    <img class="ab-poster"
-         src="images/about-poster.png"
-         alt="What is best in life? — ClaudeWorkbench, governed barbarian" />
+    <a class="ab-back" href="/">&larr;&nbsp;Back</a>
+
+    <div class="ab-card">
+        <h1>ClaudeWorkbench <span class="ab-basic">--Basic</span></h1>
+        <p class="ab-tag">A minimal shell over Claude — stock model, all native tools, every action operator-gated.</p>
+
+        <dl class="ab-facts">
+            <dt>Version</dt>
+            <dd>@AppVersion</dd>
+
+            <dt>Host</dt>
+            <dd>@Nav.BaseUri</dd>
+
+            <dt>Sidecar</dt>
+            <dd>@Sidecar.BaseUrl <span class="ab-note">(Node, Claude Agent SDK)</span></dd>
+
+            <dt>Workspace</dt>
+            <dd>@Workspace.BasePath</dd>
+
+            <dt>Attachments</dt>
+            <dd>@Workspace.FilesDirectory</dd>
+
+            <dt>Settings</dt>
+            <dd>@Path.Combine(Workspace.BasePath, "agent-settings.json") <span class="ab-note">(model + reasoning)</span></dd>
+        </dl>
+
+        <ul class="ab-principles">
+            <li><b>Nothing injected</b> — the system prompt is empty and no CLAUDE.md or personal settings are loaded.</li>
+            <li><b>Everything asks</b> — each tool call pauses at the Allow/Deny gate before it runs.</li>
+            <li><b>Blank canvas</b> — fork the sidecar (<code>sidecar/basic/index.ts</code>) to build your own workflow.</li>
+        </ul>
+
+        <p class="ab-links">
+            <a href="https://github.com/rdavi10471a2/ClaudeShell" target="_blank" rel="noopener">ClaudeShell repository</a>
+            <span class="ab-sep">·</span>
+            <a href="https://github.com/rdavi10471a2/ClaudeWorkbench" target="_blank" rel="noopener">ClaudeWorkbench</a> — a fully-worked governed workflow built on this shell
+        </p>
+    </div>
 </div>
 
 <style>
@@ -19,7 +58,8 @@
         align-items: center;
         justify-content: center;
         padding: 24px;
-        background: #0d0b09;
+        background: #f4f5f7;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     }
 
     .ab-back {
@@ -27,34 +67,58 @@
         top: 16px;
         left: 16px;
         z-index: 5;
-        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
         font-size: 0.78rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: #cbb189;
+        color: #445;
         text-decoration: none;
         padding: 6px 12px;
-        border: 1px solid rgba(203, 162, 75, 0.4);
+        border: 1px solid #c9cdd4;
         border-radius: 999px;
-        background: rgba(0, 0, 0, 0.45);
+        background: #fff;
     }
 
-    .ab-back:hover {
-        color: #ffffff;
-        border-color: #db4b2b;
+    .ab-back:hover { border-color: #667; color: #111; }
+
+    .ab-card {
+        max-width: 720px;
+        width: 100%;
+        background: #fff;
+        border: 1px solid #e0e3e8;
+        border-radius: 10px;
+        box-shadow: 0 10px 40px rgba(20, 24, 32, 0.08);
+        padding: 32px 36px;
     }
 
-    .ab-back:focus-visible {
-        outline: 2px solid #7bb7b0;
-        outline-offset: 2px;
+    .ab-card h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    .ab-basic { color: #6b7280; font-weight: 500; }
+    .ab-tag { margin: 0 0 20px; color: #4b5563; }
+
+    .ab-facts {
+        display: grid;
+        grid-template-columns: 130px 1fr;
+        row-gap: 8px;
+        column-gap: 16px;
+        margin: 0 0 20px;
+        font-size: 0.92rem;
     }
 
-    .ab-poster {
-        max-width: 100%;
-        max-height: calc(100vh - 48px);
-        width: auto;
-        height: auto;
-        border-radius: 6px;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
-    }
+    .ab-facts dt { color: #6b7280; font-weight: 600; }
+    .ab-facts dd { margin: 0; font-family: Consolas, monospace; word-break: break-all; }
+    .ab-note { color: #9aa1ab; font-family: system-ui, sans-serif; }
+
+    .ab-principles { margin: 0 0 20px; padding-left: 20px; font-size: 0.95rem; }
+    .ab-principles li { margin-bottom: 6px; }
+
+    .ab-links { margin: 0; font-size: 0.9rem; color: #4b5563; }
+    .ab-links a { color: #2563eb; text-decoration: none; }
+    .ab-links a:hover { text-decoration: underline; }
+    .ab-sep { margin: 0 8px; color: #c9cdd4; }
 </style>
+
+@code {
+    private static string AppVersion =>
+        Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
+        ?? "dev";
+}

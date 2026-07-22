@@ -82,7 +82,22 @@ sessions leave nothing on disk.
 src/ClaudeWorkbench.Host/   Blazor host — assistant tab, gate + questions dialogs, settings
 sidecar/basic/              BasicSidecar — Node driver on the Claude Agent SDK
 samples/launcher/           WinForms multi-session launcher sample
+scripts/                    publish-live.ps1 (install + Launcher shortcut) · launch-shell.ps1
 ```
+
+## Docs & tests
+
+This repo is deliberately small, and so is its documentation surface:
+
+- **This README** — setup, running, multi-session, fork points.
+- **[`sidecar/README.md`](sidecar/README.md)** — the sidecar's HTTP/SSE contract and env vars.
+- **In-app Help** (the Help button in the UI) — the user guide: the permission gate,
+  the questions dialog, composer controls, workspace and sessions.
+- The **About page** (`/about`) shows the live install's version, ports, and paths.
+
+There are **no automated tests here** — the governed test suites belonged to the
+engine this shell was factored out of and left with it. The sidecar has
+`npm run typecheck`; the solution builds with `dotnet build ClaudeWorkbench.slnx`.
 
 ## Make it yours
 

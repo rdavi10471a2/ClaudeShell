@@ -1,5 +1,5 @@
 @* In-app help. A self-contained modal (Visible + OnClose, like AgentSettingsDialog).
-   Condensed from docs/guide/. Backdrop-click and the X both dismiss. *@
+   Backdrop-click and the X both dismiss. *@
 
 @if (Visible)
 {
@@ -7,55 +7,54 @@
         <div class="help-panel" role="dialog" aria-modal="true" aria-label="ClaudeWorkbench help" @onclick:stopPropagation="true">
             <header class="help-head">
                 <div class="help-title">
-                    <h2>ClaudeWorkbench — Help</h2>
-                    <p>Governed, human-gated AI edits to your watched solution.</p>
+                    <h2>ClaudeWorkbench --Basic &mdash; Help</h2>
+                    <p>Plain Claude with all of its tools &mdash; every action needs your OK.</p>
                 </div>
                 <button type="button" class="help-close" @onclick="Close" aria-label="Close help">&times;</button>
             </header>
 
             <div class="help-body">
                 <section class="help-rule">
-                    <strong>The one rule:</strong> the agent proposes and stages &mdash; <em>you</em> accept.
-                    Only your <b>Accept</b> writes real source. Claude is read-only to your solution and
-                    can't run a shell, write files, or push to git on its own.
+                    <strong>The one rule:</strong> Claude never acts silently. Every tool call &mdash;
+                    editing a file, running a command, fetching a page &mdash; <b>pauses for your
+                    Allow or Deny</b> before it runs. Nothing is injected into Claude's prompt;
+                    this shell is stock Claude plus a permission gate.
                 </section>
 
                 <section>
-                    <h3>The governed loop</h3>
+                    <h3>How a turn works</h3>
                     <ol class="help-steps">
-                        <li><b>Prompt</b> in the <b>Workbench</b> tab.</li>
-                        <li>Claude reads your code and edits a monitor-owned <b>Working copy</b> &mdash; never your real file.</li>
-                        <li>Anything that could reach your source <b>pauses at your gate</b> &mdash; Approve or Reject.</li>
-                        <li>Claude <b>stages</b> its changes (immutable, hashed) and stops.</li>
-                        <li>The <b>Merge Review</b> opens &mdash; review the side-by-side diff and <b>Accept</b> (writes source) or Reject.</li>
+                        <li><b>Prompt</b> in the composer and Submit Turn.</li>
+                        <li>Claude answers, or reaches for a tool &mdash; each call pops the <b>Allow / Deny</b> dialog.</li>
+                        <li>If Claude asks <em>you</em> a question, the <b>questions dialog</b> opens &mdash; pick an option or type your own answer.</li>
+                        <li>Watch the transcript stream; <b>Stop</b> interrupts a running turn.</li>
                     </ol>
-                </section>
-
-                <section>
-                    <h3>The tabs</h3>
-                    <dl class="help-tabs">
-                        <div><dt>Tasks <span class="help-wip">WIP</span></dt><dd><em>Unpublished work in progress</em> &mdash; a kanban board + durable task memory for the agent. Currently disabled while the thread&#8596;task workflow is designed; it returns in a later build.</dd></div>
-                        <div><dt>Workbench</dt><dd>Chat with Claude, approve gate requests, watch the transcript, check usage.</dd></div>
-                        <div><dt>Source</dt><dd>Browse the watched solution's indexed source tree. <b>Refresh</b> re-reads the current source; <b>Rebuild Index</b> re-indexes the whole solution.</dd></div>
-                        <div><dt>Git</dt><dd>Branch, stage / commit / push accepted changes, view diffs. Or just ask Claude to commit &mdash; it's gated.</dd></div>
-                    </dl>
                 </section>
 
                 <section>
                     <h3>Key controls</h3>
                     <ul class="help-list">
-                        <li><b>Composer toolbar</b> &mdash; the icon bar under the prompt: <b>Attach</b> files (paperclip), the <b>Auto-approve</b> checkbox, and <b>Activity</b> (opens the live engine event log as a modal). The watched solution is chosen at launch.</li>
-                        <li><b>Auto-approve</b> &mdash; per-thread: candidate edits skip the per-call gate. The merge-review Accept still gates every real write.</li>
-                        <li><b>Copy</b> &mdash; each message has its own copy button; the transcript header <b>Copy</b> grabs the whole conversation.</li>
-                        <li><b>New Thread</b> &mdash; start a fresh conversation (resets auto-approve).</li>
-                        <li><b>Commit / Push</b> (Git tab) &mdash; deliberate and operator-driven; nothing reaches GitHub without your click.</li>
-                        <li><b>Settings</b> &mdash; model, reasoning level, native read tools.</li>
+                        <li><b>Attach</b> (paperclip) &mdash; add files to the next turn; they land in the workspace's <code>files\</code> folder and Claude is told to read them.</li>
+                        <li><b>Activity</b> &mdash; the raw event log for this run (tool calls, gates, usage), as a modal.</li>
+                        <li><b>Usage</b> &mdash; live context fill plus weekly / 5-hour subscription meters.</li>
+                        <li><b>Copy / Pop Out</b> &mdash; copy one message, the whole transcript, or open it as a page.</li>
+                        <li><b>New Thread</b> &mdash; fresh conversation; the old context is gone.</li>
+                        <li><b>Settings</b> &mdash; model and reasoning level (applies to new threads).</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h3>Workspace &amp; sessions</h3>
+                    <ul class="help-list">
+                        <li>Claude works in <code>%TEMP%\ClaudeShell</code> by default; set the <code>WORKSPACE</code> environment variable to point it at a real folder.</li>
+                        <li>Run several sessions side by side with the <b>ClaudeShell Launcher</b> &mdash; each gets its own ports and workspace, and temp workspaces are deleted when their session stops.</li>
                     </ul>
                 </section>
 
                 <section class="help-more">
-                    Full developer + user documentation lives in the repository under <code>docs/</code>
-                    (start at <code>docs/README.md</code>).
+                    Docs live in the repository's <code>README.md</code> and <code>sidecar/README.md</code>.
+                    A fully-worked governed workflow built on this shell is the
+                    <b>ClaudeWorkbench</b> repository.
                 </section>
             </div>
         </div>

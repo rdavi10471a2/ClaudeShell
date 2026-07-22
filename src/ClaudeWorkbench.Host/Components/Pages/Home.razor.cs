@@ -41,7 +41,6 @@ public partial class Home : IDisposable
     private readonly record struct AuthCue(string Css, string Label, string Title);
 
     private bool settingsOpen;
-    private bool aboutOpen;
     private bool helpOpen;
     private IJSObjectReference? unloadModule;
 
