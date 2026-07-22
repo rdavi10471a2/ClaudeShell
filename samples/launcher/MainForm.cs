@@ -15,6 +15,7 @@ public sealed class MainForm : Form
     private readonly Button stopButton = new() { Text = "Stop" };
     private readonly Button openButton = new() { Text = "Open" };
     private readonly Button removeButton = new() { Text = "Remove" };
+    private readonly Button claudeButton = new() { Text = "Claude sign-in", Width = 110 };
     private readonly System.Windows.Forms.Timer refresh = new() { Interval = 2000 };
     private readonly List<Session> sessions = new();
     private int nameCounter = 1;
@@ -55,12 +56,27 @@ public sealed class MainForm : Form
             Height = 44,
             Padding = new Padding(6),
         };
-        buttons.Controls.AddRange([newButton, startButton, stopButton, openButton, removeButton]);
+        buttons.Controls.AddRange([newButton, startButton, stopButton, openButton, removeButton, claudeButton]);
         newButton.Click += (_, _) => NewSession();
         startButton.Click += (_, _) => StartSelected();
         stopButton.Click += (_, _) => StopSelected();
         openButton.Click += (_, _) => OpenSelected();
         removeButton.Click += (_, _) => RemoveSelected();
+
+        // The Claude button drops a small menu: sign in, check status, sign out. Each
+        // opens a terminal on the CLI's own interactive flow - see AuthLauncher for why
+        // a terminal. This is THE login path when no other Claude tool on the machine
+        // is signed in yet; skip it if Claude Code / the claude CLI already is.
+        ContextMenuStrip claudeMenu = new();
+        claudeMenu.Items.Add("Sign in to Claude…", null, (_, _) => RunAuth(AuthLauncher.LaunchLogin));
+        claudeMenu.Items.Add("Check Claude status", null, (_, _) => RunAuth(AuthLauncher.LaunchStatus));
+        // Sign-out first is how you force a genuinely fresh login: `login` on an
+        // already-authenticated CLI can short-circuit.
+        claudeMenu.Items.Add("Sign out of Claude", null, (_, _) => RunAuth(AuthLauncher.LaunchLogout));
+        claudeButton.Click += (_, _) => claudeMenu.Show(claudeButton, new Point(0, claudeButton.Height));
+        new ToolTip().SetToolTip(claudeButton,
+            "Sign in / status / sign out for the Claude CLI. The login is cached per machine " +
+            "and shared by every session - skip if another Claude tool is already signed in.");
 
         Controls.Add(list);
         Controls.Add(buttons);
@@ -205,6 +221,43 @@ public sealed class MainForm : Form
         foreach (Session session in sessions)
         {
             Stop(session);
+        }
+    }
+
+    // Confirm a Claude CLI is reachable (PATH, or the copy bundled inside the
+    // sidecar's node_modules), then run the chosen auth flow in its own terminal.
+    private void RunAuth(Action<string?> launch)
+    {
+        string? bundledCliJs = BundledClaudeCli();
+        if (!AuthLauncher.IsAvailable(bundledCliJs))
+        {
+            MessageBox.Show(this, AuthLauncher.InstallHint, "Claude sign-in");
+            return;
+        }
+
+        try
+        {
+            launch(bundledCliJs);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, $"Could not start the Claude CLI:\n{exception.Message}", "Claude sign-in");
+        }
+    }
+
+    // The Agent SDK vendors the claude CLI; a publish-live install has it under
+    // <root>\sidecar\node_modules even when nothing is installed globally.
+    private static string? BundledClaudeCli()
+    {
+        try
+        {
+            string sidecarDir = ResolveInstall().SidecarDir;
+            string cli = Path.Combine(sidecarDir, "node_modules", "@anthropic-ai", "claude-agent-sdk", "cli.js");
+            return File.Exists(cli) ? cli : null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
         }
     }
 

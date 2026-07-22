@@ -38,7 +38,7 @@ Blazor host (:5000)  ── spawns ──►  BasicSidecar (:6110, Node + Claude
 |---|---|
 | **.NET 10 SDK** | the Blazor host |
 | **Node.js** (LTS) | the sidecar runs the Claude Agent SDK (Node-only) |
-| **A Claude login** | a subscription login cached by the `claude` CLI is enough — the CLI ships inside the Agent SDK package, no API key needed |
+| **A Claude login** | a subscription login cached by the `claude` CLI is enough — the CLI ships inside the Agent SDK package, no API key needed. **Not signed in anywhere yet?** The Launcher's **Claude sign-in** button is the login path: it opens the CLI's interactive sign-in (using the bundled CLI if none is installed). Skip it if Claude Code or the `claude` CLI is already signed in on this machine. |
 
 ## Run it
 
@@ -74,7 +74,9 @@ dotnet run --project samples/launcher
 
 Create/start/stop named sessions with auto-assigned ports; a session started on a
 launcher-created temp workspace has its folder **deleted when it stops**, so scratch
-sessions leave nothing on disk.
+sessions leave nothing on disk. The Launcher's **Claude sign-in** button drops a menu
+(sign in / check status / sign out) that runs the CLI's interactive auth in its own
+console — the login is cached per machine and shared by every session.
 
 ## Layout
 
