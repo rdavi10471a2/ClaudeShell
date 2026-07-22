@@ -23,6 +23,9 @@ public static class ApprovalFormatter
 
     private static readonly string[] SearchFieldOrder = ["pattern", "query", "q"];
     private static readonly string[] PathFieldOrder = ["file_path", "path", "sourceFilePath", "filePath", "file", "targetPath"];
+    // Action tools whose most telling argument is a command/skill/url/description
+    // (Bash, PowerShell, Skill, WebFetch, WebSearch, Task/Agent, …).
+    private static readonly string[] ActionFieldOrder = ["skill", "command", "url", "description", "prompt", "subagent_type"];
     private static readonly string[] SymbolFieldOrder = ["afterSymbol", "name", "symbol", "containingType"];
 
     // Compact one-line label for a tool call in the transcript/activity feed:
@@ -55,6 +58,14 @@ public static class ApprovalFormatter
             if (TryGetNonEmptyString(element, key, out string filePath))
             {
                 return Path.GetFileName(filePath.TrimEnd('/', '\\'));
+            }
+        }
+
+        foreach (string key in ActionFieldOrder)
+        {
+            if (TryGetNonEmptyString(element, key, out string action))
+            {
+                return Shorten(action);
             }
         }
 

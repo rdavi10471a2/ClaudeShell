@@ -116,13 +116,27 @@ public sealed partial class SidecarOperatorConsole : IOperatorConsole, IApproval
         if (string.Equals(evt.Tool, "Read", StringComparison.OrdinalIgnoreCase))
         {
             string? path = FilePathOf(evt.Input);
-            if (path is not null && ImageExtensions.Contains(Path.GetExtension(path)))
+            if (path is not null
+                && ImageExtensions.Contains(Path.GetExtension(path))
+                && FileExists(path))
             {
                 return new TranscriptEntry(TranscriptKind.Image, path, FormatTime(evt.Ts));
             }
         }
 
         return new TranscriptEntry(TranscriptKind.ToolCall, ApprovalFormatter.ShortLabel(evt.Tool ?? string.Empty, evt.Input), FormatTime(evt.Ts));
+    }
+
+    private static bool FileExists(string path)
+    {
+        try
+        {
+            return File.Exists(path);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private static string? FilePathOf(System.Text.Json.JsonElement? input)

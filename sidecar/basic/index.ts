@@ -28,8 +28,16 @@ const workspaceCwd: string | undefined = process.env.WORKSPACE || undefined;
 // Optional extra read-only directory (operator uploads) granted to the agent.
 const uploadsDir: string | undefined = process.env.UPLOADS_DIR || undefined;
 
-// Tools that never prompt — pure agent bookkeeping, not observable actions.
-const AUTO_ALLOWED = new Set<string>(["TodoWrite", "ToolSearch"]);
+// Tools that never prompt: agent bookkeeping plus read-only local inspection
+// (Read/Grep/Glob don't mutate anything or reach the network — like the real
+// Claude Code client, only writes, commands, and egress pause at the gate).
+const AUTO_ALLOWED = new Set<string>([
+  "TodoWrite",
+  "ToolSearch",
+  "Read",
+  "Grep",
+  "Glob",
+]);
 
 // --- minimal content-block shapes we read off SDK messages --------------
 interface TextBlock {
