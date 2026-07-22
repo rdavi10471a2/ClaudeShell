@@ -42,6 +42,12 @@
                     }
                 </section>
             </div>
+            <div class="agent-modal-remember-note">
+                &#9888; <strong>Don't ask again</strong> matches by tool name only —
+                <em>@approval.Tool</em> — <strong>not</strong> the arguments above. Every
+                future @approval.Tool call this thread (any command/path/URL) will run
+                without prompting until New Thread.
+            </div>
             <div class="agent-modal-footer">
                 <RadzenButton Text="Allow"
                               ButtonStyle="ButtonStyle.Success"
@@ -51,7 +57,7 @@
                 <RadzenButton Text="@($"Allow {approval.Tool} — don't ask again")"
                               ButtonStyle="ButtonStyle.Info"
                               Size="ButtonSize.Small"
-                              Title="@($"Stop prompting for {approval.Tool} for the rest of this thread (reset on New Thread)")"
+                              Title="@($"Stop prompting for ANY {approval.Tool} call for the rest of this thread — arguments are not considered (reset on New Thread)")"
                               Click="@(() => ResolveApprovalAsync(true, remember: true))" />
                 <RadzenButton Text="Deny"
                               ButtonStyle="ButtonStyle.Light"

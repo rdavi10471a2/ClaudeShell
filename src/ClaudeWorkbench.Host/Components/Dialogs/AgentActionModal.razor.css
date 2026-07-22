@@ -364,6 +364,21 @@
     box-sizing: border-box;
 }
 
+.agent-modal-remember-note {
+    padding: 10px 18px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: #7a5b00;
+    background: #fff8e6;
+    border-top: 1px solid #f0e3b8;
+}
+
+.agent-modal-remember-note em {
+    font-style: normal;
+    font-family: Consolas, monospace;
+    color: #5a4400;
+}
+
 .agent-modal-footer {
     display: flex;
     flex-wrap: wrap;
