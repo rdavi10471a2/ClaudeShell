@@ -1,23 +1,19 @@
 <#
 .SYNOPSIS
-    Publishes a ClaudeShell "live" install: the Blazor host, the Node sidecar (BasicSidecar),
-    and the Launcher, side by side in one folder, plus a shortcut to the Launcher.
+    Publishes a ClaudeShell "live" install: the Blazor host, the BasicSidecar, and the
+    session Launcher, side by side in one folder, plus a desktop shortcut to the Launcher.
 
 .DESCRIPTION
-    Produces this layout, which the Launcher recognises as a shell root:
+    Produces this layout, which the Launcher recognises as an install root:
 
         <Destination>\
-            host\      ClaudeWorkbench.Host.exe (the Blazor app) + its config\
-            sidecar\   dist\index.js + production node_modules
-            launcher\  ClaudeWorkbench.Launcher.exe
-            runtime\   created on first run: one folder per workspace
+            host\      ClaudeWorkbench.Host.exe (the Blazor app)
+            sidecar\   dist\index.js + production node_modules (the Claude Agent SDK driver)
+            launcher\  ClaudeShell.Launcher.exe (multi-session manager)
 
-    The Launcher finds the host next to itself (<root>\host), the sidecar at <root>\sidecar,
-    and provisions every instance into <root>\runtime\<workspace>. So this install works
-    wherever it is put, and does not depend on the source checkout it was built from.
-
-    runtime\ is never touched by this script: re-publishing over an existing install keeps
-    the workspaces and indexes that are already there.
+    The Launcher finds the host at <root>\host and the sidecar at <root>\sidecar, so the
+    install works wherever the folder is put. Sessions started on a launcher-created temp
+    workspace are deleted from disk when they stop.
 
     ASCII only, on purpose: Windows PowerShell 5.1 reads this file as ANSI and mangles any
     non-ASCII punctuation into a parse error.
@@ -32,11 +28,11 @@
     Skip creating the desktop shortcut (one is still written into the install folder).
 
 .PARAMETER Clean
-    Remove the host\, sidecar\ and launcher\ folders first. runtime\ is preserved.
+    Remove the host\, sidecar\ and launcher\ folders first.
 
 .EXAMPLE
     .\scripts\publish-live.ps1
-    .\scripts\publish-live.ps1 -Destination D:\Workbench -Clean
+    .\scripts\publish-live.ps1 -Destination D:\ClaudeShell -Clean
 #>
 [CmdletBinding()]
 param(
@@ -48,16 +44,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Break the recursion: this script runs `dotnet publish -c Release`, which builds the same
-# projects whose Release build triggers this script (see Directory.Build.targets). The child
-# builds inherit this variable and skip the post-build publish target.
-$env:CWB_SKIP_PUBLISH_LIVE = '1'
-
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $hostProject = Join-Path $repoRoot 'src\ClaudeWorkbench.Host\ClaudeWorkbench.Host.csproj'
-$sidecarSource = Join-Path $repoRoot 'sidecar'
+$launcherProject = Join-Path $repoRoot 'samples\launcher\ClaudeShell.Launcher.csproj'
+$basicSidecar = Join-Path $repoRoot 'sidecar\basic'
 
-foreach ($required in @($hostProject, $sidecarSource)) {
+foreach ($required in @($hostProject, $launcherProject, $basicSidecar)) {
     if (-not (Test-Path $required)) {
         throw "Not a ClaudeShell checkout - missing $required"
     }
@@ -65,10 +57,11 @@ foreach ($required in @($hostProject, $sidecarSource)) {
 
 $hostOut = Join-Path $Destination 'host'
 $sidecarOut = Join-Path $Destination 'sidecar'
+$launcherOut = Join-Path $Destination 'launcher'
 
-# A running install holds its exes open and publish fails partway through with an unhelpful
-# MSBuild error. Say so up front instead.
-$inUse = Get-Process -Name 'ClaudeWorkbench.Host' -ErrorAction SilentlyContinue |
+# A running install holds its exes open and publish fails partway through with an
+# unhelpful MSBuild error. Say so up front instead.
+$inUse = Get-Process -Name 'ClaudeWorkbench.Host', 'ClaudeShell.Launcher' -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -and $_.Path.StartsWith($Destination, [StringComparison]::OrdinalIgnoreCase) }
 if ($inUse) {
     $names = ($inUse | ForEach-Object { "$($_.ProcessName) (pid $($_.Id))" }) -join ', '
@@ -78,8 +71,7 @@ if ($inUse) {
 Write-Host "Publishing ClaudeShell ($Configuration) -> $Destination" -ForegroundColor Cyan
 
 if ($Clean) {
-    # Deliberately only the two build outputs: runtime\ holds the user's instance state.
-    foreach ($stale in @($hostOut, $sidecarOut)) {
+    foreach ($stale in @($hostOut, $sidecarOut, $launcherOut)) {
         if (Test-Path $stale) {
             Write-Host "  cleaning $stale"
             Remove-Item $stale -Recurse -Force
@@ -89,28 +81,19 @@ if ($Clean) {
 
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 
-# --- 1. Blazor host -------------------------------------------------------------------
+# --- 1. Blazor host ---------------------------------------------------------------------
 Write-Host ''
-Write-Host '[1/4] Publishing host (Blazor + MCP surface)...' -ForegroundColor Cyan
+Write-Host '[1/4] Publishing host (Blazor)...' -ForegroundColor Cyan
 dotnet publish $hostProject -c $Configuration -o $hostOut --nologo
 if ($LASTEXITCODE -ne 0) { throw "Host publish failed ($LASTEXITCODE)." }
 
-# The mutable watched-solution config must not ship: each instance gets its own, written by
-# the Launcher. Shipping one would point every fresh install at the build machine's workspace.
-$strayConfig = Join-Path $hostOut 'config\appsettings.json'
-if (Test-Path $strayConfig) {
-    Remove-Item $strayConfig -Force
-    Write-Host '  removed build-machine config\appsettings.json (instances get their own)'
-}
-
-# --- 2. Sidecar (BasicSidecar) -----------------------------------------------
+# --- 2. BasicSidecar --------------------------------------------------------------------
 Write-Host ''
-Write-Host '[2/3] Building BasicSidecar...' -ForegroundColor Cyan
+Write-Host '[2/4] Building BasicSidecar...' -ForegroundColor Cyan
 $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
 if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
 if (-not $npm) { throw 'npm was not found on PATH - needed to build the sidecar.' }
 
-$basicSidecar = Join-Path $sidecarSource 'basic'
 Push-Location $basicSidecar
 try {
     if (-not (Test-Path (Join-Path $basicSidecar 'node_modules'))) {
@@ -131,15 +114,15 @@ Copy-Item (Join-Path $basicSidecar 'package.json') $sidecarOut -Force
 $lockFile = Join-Path $basicSidecar 'package-lock.json'
 if (Test-Path $lockFile) { Copy-Item $lockFile $sidecarOut -Force }
 
-# Runtime dependencies only (the Agent SDK + express). Falls back to copying the checkout's
-# node_modules when npm cannot reach the registry, so an offline publish still works.
+# Runtime dependencies only (the Agent SDK + express). Falls back to copying the
+# checkout's node_modules when npm cannot reach the registry.
 Write-Host '  installing production dependencies...'
 Push-Location $sidecarOut
 try {
-    if (Test-Path (Join-Path $sidecarOut 'package-lock.json')) { 
-        & $npm.Source ci --omit=dev 
-    } else { 
-        & $npm.Source install --omit=dev 
+    if (Test-Path (Join-Path $sidecarOut 'package-lock.json')) {
+        & $npm.Source ci --omit=dev
+    } else {
+        & $npm.Source install --omit=dev
     }
 }
 finally {
@@ -158,29 +141,34 @@ if (-not (Test-Path (Join-Path $sidecarOut 'dist\index.js'))) {
     throw "BasicSidecar publish incomplete: $sidecarOut\dist\index.js is missing."
 }
 
-# Copy launch scripts
-Write-Host '  copying launch scripts...'
+# --- 3. Launcher ------------------------------------------------------------------------
+Write-Host ''
+Write-Host '[3/4] Publishing the session Launcher...' -ForegroundColor Cyan
+dotnet publish $launcherProject -c $Configuration -o $launcherOut --nologo
+if ($LASTEXITCODE -ne 0) { throw "Launcher publish failed ($LASTEXITCODE)." }
+
+$launcherExe = Join-Path $launcherOut 'ClaudeShell.Launcher.exe'
+if (-not (Test-Path $launcherExe)) {
+    throw "Launcher publish incomplete: $launcherExe is missing."
+}
+
+# Also ship the direct single-session script for shortcut-free use.
 $scriptsOut = Join-Path $Destination 'scripts'
 New-Item -ItemType Directory -Force -Path $scriptsOut | Out-Null
 Copy-Item (Join-Path $repoRoot 'scripts\launch-shell.ps1') $scriptsOut -Force
-Copy-Item (Join-Path $repoRoot 'scripts\create-shortcuts.ps1') $scriptsOut -Force
 
-# --- 3. Shortcuts -----------------------------------------------------------------------
+# --- 4. Shortcuts -----------------------------------------------------------------------
 Write-Host ''
-Write-Host '[3/3] Creating shortcuts...' -ForegroundColor Cyan
-$launchScript = Join-Path $scriptsOut 'launch-shell.ps1'
-$pwshExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source
-if (-not $pwshExe) { $pwshExe = 'powershell.exe' }
+Write-Host '[4/4] Creating shortcuts...' -ForegroundColor Cyan
 
-function New-DirectLaunchShortcut {
+function New-LauncherShortcut {
     param([string]$LinkPath)
     $shell = New-Object -ComObject WScript.Shell
     try {
         $shortcut = $shell.CreateShortcut($LinkPath)
-        $shortcut.TargetPath = $pwshExe
-        $shortcut.Arguments = "-NoExit -ExecutionPolicy Bypass -File `"$launchScript`""
-        $shortcut.WorkingDirectory = $Destination
-        $shortcut.Description = 'ClaudeShell — starts immediately with temp workspace'
+        $shortcut.TargetPath = $launcherExe
+        $shortcut.WorkingDirectory = $launcherOut
+        $shortcut.Description = 'ClaudeShell Launcher - manage Claude sessions'
         $shortcut.Save()
         Write-Host "  $LinkPath"
     }
@@ -189,27 +177,22 @@ function New-DirectLaunchShortcut {
     }
 }
 
-New-DirectLaunchShortcut -LinkPath (Join-Path $Destination 'ClaudeShell.lnk')
+New-LauncherShortcut -LinkPath (Join-Path $Destination 'ClaudeShell Launcher.lnk')
 if (-not $NoShortcut) {
-    $desktopLink = Join-Path ([Environment]::GetFolderPath('Desktop')) 'ClaudeShell.lnk'
-    New-DirectLaunchShortcut -LinkPath $desktopLink
+    New-LauncherShortcut -LinkPath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'ClaudeShell Launcher.lnk')
 }
 
 Write-Host ''
 Write-Host "Done. ClaudeShell install root: $Destination" -ForegroundColor Green
 Write-Host "  host      $hostOut"
-Write-Host "  sidecar   $sidecarOut  (BasicSidecar - no governance)"
-Write-Host "  scripts   $scriptsOut   (launch-shell.ps1)"
-Write-Host "  runtime   $(Join-Path $Destination 'runtime')  (per-workspace state, created on first Start)"
+Write-Host "  sidecar   $sidecarOut"
+Write-Host "  launcher  $launcherOut"
 Write-Host ''
 Write-Host 'Quick start:' -ForegroundColor Yellow
-Write-Host '  → Click "ClaudeShell.lnk" to start (uses temp workspace by default)'
-Write-Host '  → Or: powershell -NoExit -ExecutionPolicy Bypass -File "$launchScript" -Workspace C:\MyProject'
-Write-Host ''
-Write-Host 'To build a workspace manager (like the old Launcher):' -ForegroundColor Cyan
-Write-Host '  See samples/ai-monitor-launcher/ for a complete example'
+Write-Host '  Double-click "ClaudeShell Launcher" (desktop) -> New Session -> Open'
+Write-Host '  Single session without the Launcher: scripts\launch-shell.ps1'
 Write-Host ''
 Write-Host 'Target machine requirements:' -ForegroundColor Yellow
-Write-Host '  - .NET 10 SDK       (for the host and indexing via MSBuild/Roslyn)'
-Write-Host '  - Node.js on PATH   (the claude CLI ships inside the sidecar)'
-Write-Host '  - a Claude login in ~\.claude  (or ANTHROPIC_API_KEY for billing)'
+Write-Host '  - .NET 10 runtime (or SDK)'
+Write-Host '  - Node.js on PATH (the claude CLI ships inside the sidecar node_modules)'
+Write-Host '  - a Claude login in ~\.claude'

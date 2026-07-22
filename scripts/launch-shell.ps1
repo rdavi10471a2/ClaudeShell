@@ -1,169 +1,84 @@
 <#
 .SYNOPSIS
-    Direct launcher for ClaudeShell: starts the Blazor host and BasicSidecar, opens the browser.
-    No Launcher GUI — just spin up Claude and go.
-
-.DESCRIPTION
-    This script starts ClaudeShell components directly without the Launcher app:
-    1. Starts the BasicSidecar (Node)
-    2. Starts the Blazor host (.NET)
-    3. Opens http://localhost:5000 in the browser
-    4. Provides a simple stop command or Ctrl+C to shut down both
-
-    If no workspace is specified, uses %TEMP%\ClaudeShell as a disposable workspace.
+    Direct single-session launcher for a published ClaudeShell install: starts the
+    Blazor host (which starts and supervises the sidecar itself) and opens the browser.
 
 .PARAMETER ShellRoot
-    Path to the ClaudeShell install root (default: current directory).
+    The install root (the folder holding host\ and sidecar\). Defaults to the parent
+    of this script's folder, which is correct inside a publish-live.ps1 install.
 
 .PARAMETER Workspace
-    Working directory for Claude. If omitted, uses %TEMP%\ClaudeShell.
-    This is NOT watched/indexed — it's just the cwd for tool execution (Read, Bash, PowerShell, etc.).
-
-.PARAMETER NoSidecar
-    Skip starting the sidecar (assumes it's already running elsewhere).
+    Working directory for Claude. If omitted, the host uses %TEMP%\ClaudeShell.
 
 .PARAMETER Port
-    Host port (default: 5000).
+    Host UI port (default 5000).
+
+.PARAMETER SidecarPort
+    Sidecar port (default 6110). Change both ports + workspace to run a second session,
+    or just use the Launcher (launcher\ClaudeShell.Launcher.exe).
 
 .EXAMPLE
     .\launch-shell.ps1
-    .\launch-shell.ps1 -ShellRoot C:\ClaudeShellLive
-    .\launch-shell.ps1 -Workspace C:\MyProject
-    .\launch-shell.ps1 -NoSidecar
+    .\launch-shell.ps1 -Workspace C:\MyProject -Port 5001 -SidecarPort 6111
 #>
 [CmdletBinding()]
 param(
-    [string]$ShellRoot = $PSScriptRoot,
+    [string]$ShellRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$Workspace,
-    [switch]$NoSidecar,
-    [int]$Port = 5000
+    [int]$Port = 5000,
+    [int]$SidecarPort = 6110
 )
 
 $ErrorActionPreference = 'Stop'
 
-# Resolve paths
-if (-not (Test-Path $ShellRoot)) {
-    throw "ShellRoot not found: $ShellRoot"
-}
-
-$hostPath = Join-Path $ShellRoot 'host'
-$sidecarPath = Join-Path $ShellRoot 'sidecar'
-$hostExe = Join-Path $hostPath 'ClaudeWorkbench.Host.exe'
-
+$hostExe = Join-Path $ShellRoot 'host\ClaudeWorkbench.Host.exe'
 if (-not (Test-Path $hostExe)) {
-    throw "Host exe not found at $hostExe. Is this a valid ClaudeShell install?"
+    throw "Host exe not found at $hostExe. Run scripts\publish-live.ps1 first (or pass -ShellRoot)."
 }
 
-# Workspace setup
-if (-not $Workspace) {
-    $Workspace = Join-Path $env:TEMP 'ClaudeShell'
-    $tempWorkspace = $true
-} else {
-    $tempWorkspace = $false
-}
-
-if (-not (Test-Path $Workspace)) {
-    Write-Host "Creating workspace: $Workspace" -ForegroundColor Gray
-    New-Item -ItemType Directory -Path $Workspace -Force | Out-Null
-}
+$url = "http://localhost:$Port"
 
 Write-Host ''
 Write-Host 'Starting ClaudeShell...' -ForegroundColor Cyan
-Write-Host "  Workspace: $Workspace" -ForegroundColor Gray
-if ($tempWorkspace) {
-    Write-Host "  (using temp workspace; see Launcher GUI to pick a real project)" -ForegroundColor DarkGray
+if ($Workspace) {
+    New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
+    Write-Host "  Workspace: $Workspace" -ForegroundColor Gray
+} else {
+    Write-Host "  Workspace: %TEMP%\ClaudeShell (default)" -ForegroundColor Gray
 }
 
-# Sidecar (if not skipped)
-$sidecarJob = $null
-if (-not $NoSidecar) {
-    Write-Host '  → Starting BasicSidecar (Node)...' -ForegroundColor Gray
-    $sidecarJs = Join-Path $sidecarPath 'dist\index.js'
-    if (-not (Test-Path $sidecarJs)) {
-        Write-Warning "Sidecar dist/index.js not found at $sidecarJs. Skipping sidecar."
-    } else {
-        try {
-            $sidecarJob = Start-Process -FilePath node -ArgumentList $sidecarJs -WorkingDirectory $sidecarPath -PassThru -NoNewWindow
-            Start-Sleep -Milliseconds 500
-            Write-Host '  ✓ BasicSidecar started (PID: ' -NoNewline -ForegroundColor Green
-            Write-Host $sidecarJob.Id -NoNewline
-            Write-Host ')'
-        } catch {
-            Write-Warning "Failed to start sidecar: $_"
-        }
-    }
-}
+# The host launches and supervises the sidecar itself (from <root>\sidecar).
+$env:ASPNETCORE_URLS = $url
+$env:Sidecar__Port = "$SidecarPort"
+if ($Workspace) { $env:WORKSPACE = $Workspace } else { Remove-Item Env:WORKSPACE -ErrorAction SilentlyContinue }
 
-# Host
-Write-Host '  → Starting Blazor host...' -ForegroundColor Gray
-$env:ASPNETCORE_URLS = "http://localhost:$Port"
-$env:WATCHED_SOLUTION_PATH = $Workspace
-try {
-    $hostJob = Start-Process -FilePath $hostExe -WorkingDirectory $hostPath -PassThru -NoNewWindow
-    Write-Host '  ✓ Host started (PID: ' -NoNewline -ForegroundColor Green
-    Write-Host $hostJob.Id -NoNewline
-    Write-Host ')'
-}
-catch {
-    Write-Error "Failed to start host: $_"
-    if ($sidecarJob) { Stop-Process -Id $sidecarJob.Id -Force -ErrorAction SilentlyContinue }
-    exit 1
-}
+$hostProc = Start-Process -FilePath $hostExe -WorkingDirectory (Split-Path -Parent $hostExe) -PassThru -NoNewWindow
 
-# Wait for host to be ready
-Write-Host "  → Waiting for host to be ready at http://localhost:$Port..." -ForegroundColor Gray
-$maxRetries = 30
-$retries = 0
-while ($retries -lt $maxRetries) {
+# Wait for the host, then open the browser.
+Write-Host "  Waiting for $url..." -ForegroundColor Gray
+$ready = $false
+for ($i = 0; $i -lt 60; $i++) {
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:$Port" -TimeoutSec 1 -ErrorAction SilentlyContinue
-        if ($response.StatusCode -eq 200) {
-            Write-Host '  ✓ Host is ready' -ForegroundColor Green
-            break
-        }
-    } catch {
-        # Host not ready yet
-    }
-    $retries++
-    Start-Sleep -Milliseconds 200
+        $response = Invoke-WebRequest -Uri "$url/health" -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop
+        if ($response.StatusCode -eq 200) { $ready = $true; break }
+    } catch { Start-Sleep -Milliseconds 500 }
 }
 
-if ($retries -eq $maxRetries) {
-    Write-Warning "Host did not respond after ${maxRetries}s. It may still be starting..."
+if (-not $ready) {
+    Write-Warning 'Host did not respond in 30s; it may still be starting.'
 }
 
-# Open browser
-Write-Host "  → Opening browser at http://localhost:$Port..." -ForegroundColor Gray
-Start-Process "http://localhost:$Port"
+Start-Process $url
+Write-Host ''
+Write-Host "ClaudeShell is running at $url (host pid $($hostProc.Id))." -ForegroundColor Green
+Write-Host 'Press Ctrl+C or close this window to stop it.' -ForegroundColor Yellow
 
-Write-Host ''
-Write-Host 'ClaudeShell is running.' -ForegroundColor Green
-Write-Host "  Host:      http://localhost:$Port"
-Write-Host "  Workspace: $Workspace"
-Write-Host "  Sidecar:   http://localhost:6110" -ForegroundColor Dim
-Write-Host ''
-Write-Host 'Press Ctrl+C to stop, or type "exit" to close this window.' -ForegroundColor Yellow
-Write-Host ''
-
-# Wait for processes
 try {
-    if ($hostJob -and -not $hostJob.HasExited) {
-        $hostJob.WaitForExit()
-    }
-}
-catch {
-    # Process ended
+    $hostProc.WaitForExit()
 }
 finally {
-    # Cleanup
-    if ($sidecarJob -and -not $sidecarJob.HasExited) {
-        Write-Host ''
-        Write-Host 'Stopping sidecar...' -ForegroundColor Gray
-        Stop-Process -Id $sidecarJob.Id -Force -ErrorAction SilentlyContinue
-    }
-    if ($hostJob -and -not $hostJob.HasExited) {
-        Write-Host 'Stopping host...' -ForegroundColor Gray
-        Stop-Process -Id $hostJob.Id -Force -ErrorAction SilentlyContinue
+    if (-not $hostProc.HasExited) {
+        Stop-Process -Id $hostProc.Id -Force -ErrorAction SilentlyContinue
     }
     Write-Host 'Done.' -ForegroundColor Green
 }

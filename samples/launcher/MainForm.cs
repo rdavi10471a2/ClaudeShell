@@ -123,18 +123,11 @@ public sealed class MainForm : Form
         }
 
         Directory.CreateDirectory(session.Workspace);
-        string repoRoot = FindRepoRoot();
-        string project = Path.Combine(repoRoot, "src", "ClaudeWorkbench.Host", "ClaudeWorkbench.Host.csproj");
-        string sidecarDir = Path.Combine(repoRoot, "sidecar", "basic");
-
-        // Prefer the built exe (fast start); fall back to `dotnet run`.
-        string exeDebug = Path.Combine(repoRoot, "src", "ClaudeWorkbench.Host", "bin", "Debug", "net10.0", "ClaudeWorkbench.Host.exe");
-        string exeRelease = Path.Combine(repoRoot, "src", "ClaudeWorkbench.Host", "bin", "Release", "net10.0", "ClaudeWorkbench.Host.exe");
-        string? exe = File.Exists(exeDebug) ? exeDebug : File.Exists(exeRelease) ? exeRelease : null;
+        (string? exe, string? project, string sidecarDir, string workingDir) = ResolveInstall();
 
         ProcessStartInfo info = exe is not null
-            ? new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe)! }
-            : new ProcessStartInfo("dotnet", $"run --project \"{project}\" --no-launch-profile") { WorkingDirectory = repoRoot };
+            ? new ProcessStartInfo(exe) { WorkingDirectory = workingDir }
+            : new ProcessStartInfo("dotnet", $"run --project \"{project}\" --no-launch-profile") { WorkingDirectory = workingDir };
         info.UseShellExecute = false;
         info.CreateNoWindow = true;
         info.Environment["ASPNETCORE_URLS"] = session.Url;
@@ -273,22 +266,37 @@ public sealed class MainForm : Form
         }
     }
 
-    // The launcher is a repo sample: walk up from its own folder until the repo
-    // layout (src/ClaudeWorkbench.Host) is found.
-    private static string FindRepoRoot()
+    // Works from both layouts, probed by walking up from the launcher's own folder:
+    //   published install:  <root>\host\ClaudeWorkbench.Host.exe + <root>\sidecar\dist\index.js
+    //   repo checkout:      <root>\src\ClaudeWorkbench.Host\... + <root>\sidecar\basic
+    private static (string? Exe, string? Project, string SidecarDir, string WorkingDir) ResolveInstall()
     {
         DirectoryInfo? dir = new(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "src", "ClaudeWorkbench.Host", "ClaudeWorkbench.Host.csproj")))
+            string installedExe = Path.Combine(dir.FullName, "host", "ClaudeWorkbench.Host.exe");
+            string installedSidecar = Path.Combine(dir.FullName, "sidecar");
+            if (File.Exists(installedExe) && File.Exists(Path.Combine(installedSidecar, "dist", "index.js")))
             {
-                return dir.FullName;
+                return (installedExe, null, installedSidecar, Path.GetDirectoryName(installedExe)!);
+            }
+
+            string project = Path.Combine(dir.FullName, "src", "ClaudeWorkbench.Host", "ClaudeWorkbench.Host.csproj");
+            if (File.Exists(project))
+            {
+                string sidecarDir = Path.Combine(dir.FullName, "sidecar", "basic");
+                string exeDebug = Path.Combine(dir.FullName, "src", "ClaudeWorkbench.Host", "bin", "Debug", "net10.0", "ClaudeWorkbench.Host.exe");
+                string exeRelease = Path.Combine(dir.FullName, "src", "ClaudeWorkbench.Host", "bin", "Release", "net10.0", "ClaudeWorkbench.Host.exe");
+                string? exe = File.Exists(exeDebug) ? exeDebug : File.Exists(exeRelease) ? exeRelease : null;
+                return exe is not null
+                    ? (exe, null, sidecarDir, Path.GetDirectoryName(exe)!)
+                    : (null, project, sidecarDir, dir.FullName);
             }
 
             dir = dir.Parent;
         }
 
-        throw new InvalidOperationException("Could not locate the ClaudeShell repo root above the launcher.");
+        throw new InvalidOperationException("Could not locate a ClaudeShell install (host + sidecar) or repo checkout above the launcher.");
     }
 }
 
