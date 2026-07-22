@@ -30,7 +30,6 @@ public partial class AssistantTab : IDisposable, IAsyncDisposable
     private ElementReference chatInput;
     private IJSObjectReference? resizeModule;
     private string draft = string.Empty;
-    private bool autoApprove;
     private bool usageOpen;
     private bool wasWorking;
     private UsageSnapshot? usage;
@@ -164,7 +163,7 @@ public partial class AssistantTab : IDisposable, IAsyncDisposable
         draft = string.Empty;
         attachments.Clear();
         uploadError = null;
-        await Session.SendAsync(prompt, autoApprove);
+        await Session.SendAsync(prompt);
     }
 
     private static string ComposePrompt(string draft, IReadOnlyList<PendingAttachment> attachments)
@@ -203,8 +202,6 @@ public partial class AssistantTab : IDisposable, IAsyncDisposable
             return;
         }
 
-        // Auto-approve is per-thread; a fresh thread starts back at the gate.
-        autoApprove = false;
         await Session.NewThreadAsync();
     }
 

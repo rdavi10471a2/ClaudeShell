@@ -1,9 +1,0 @@
-node_modules/
-dist/
-*.log
-
-# smoke/boot artifacts
-boot.log
-boot.err
-e2e-*.log
-smoke-evidence/

@@ -18,14 +18,12 @@ public sealed class AuthStatusProbe : BackgroundService
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
     private readonly IHttpClientFactory httpClientFactory;
     private readonly SidecarOptions options;
-    private readonly GitService git;
     private readonly JsonSerializerOptions json = new(JsonSerializerDefaults.Web);
 
-    public AuthStatusProbe(IHttpClientFactory httpClientFactory, SidecarOptions options, GitService git)
+    public AuthStatusProbe(IHttpClientFactory httpClientFactory, SidecarOptions options)
     {
         this.httpClientFactory = httpClientFactory;
         this.options = options;
-        this.git = git;
     }
 
     public event Action? Changed;
@@ -50,11 +48,9 @@ public sealed class AuthStatusProbe : BackgroundService
 
     private async Task PollAsync(CancellationToken cancellationToken)
     {
-        // Probe both concurrently; each degrades to null on its own failure so one
-        // source being down never blanks the other.
-        Task<bool?> claudeTask = ProbeClaudeAsync(cancellationToken);
-        Task<bool?> githubTask = ProbeGitHubAsync(cancellationToken);
-        AuthStatus next = new(await claudeTask.ConfigureAwait(false), await githubTask.ConfigureAwait(false));
+        // Basic shell: only Claude auth is tracked (GitHub integration is gone). The
+        // GitHub flag stays null so the AuthStatus shape is unchanged for the UI.
+        AuthStatus next = new(await ProbeClaudeAsync(cancellationToken).ConfigureAwait(false), null);
 
         if (next != Current)
         {
@@ -77,18 +73,6 @@ public sealed class AuthStatusProbe : BackgroundService
         catch (Exception)
         {
             // Sidecar down / not yet up — unknown, not signed out.
-            return null;
-        }
-    }
-
-    private async Task<bool?> ProbeGitHubAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await git.GetGitHubAuthAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
             return null;
         }
     }

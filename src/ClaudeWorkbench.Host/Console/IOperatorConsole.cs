@@ -1,7 +1,7 @@
 namespace ClaudeWorkbench.Host.Console;
 
 // The turn/session seam: what the operator is looking at and how they start work.
-// Approvals live in IApprovalQueue; review in IReviewWorkflow; tasks in ITaskBoard.
+// Approvals (permission gates + questions) live in IApprovalQueue.
 public interface IOperatorConsole
 {
     event Action? Changed;
@@ -18,9 +18,9 @@ public interface IOperatorConsole
 
     IReadOnlyList<ActivityEntry> Activity { get; }
 
-    // autoApprove: for this turn, claude-workbench mutations skip the per-call operator
-    // gate (the merge-review Accept still gates the write to watched source).
-    Task SendAsync(string prompt, bool autoApprove);
+    // Submit one operator turn. Every tool call the turn makes pauses at the
+    // operator's Allow/Deny gate (no auto-approve in Basic).
+    Task SendAsync(string prompt);
 
     // Interrupt the in-flight turn.
     Task StopAsync();

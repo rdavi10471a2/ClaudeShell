@@ -28,18 +28,6 @@ public partial class AgentSettingsDialog
         wasVisible = Visible;
     }
 
-    private void Toggle(string toolName, bool enabled)
-    {
-        if (enabled)
-        {
-            draft.EnabledOptionalTools.Add(toolName);
-        }
-        else
-        {
-            draft.EnabledOptionalTools.Remove(toolName);
-        }
-    }
-
     private async Task Save()
     {
         Settings.Update(draft);

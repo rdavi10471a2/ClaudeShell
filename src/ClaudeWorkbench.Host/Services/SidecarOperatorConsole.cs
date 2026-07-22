@@ -1,4 +1,3 @@
-using AIMonitor.McpServer;
 using ClaudeWorkbench.Host.Console;
 
 namespace ClaudeWorkbench.Host.Services;
@@ -33,7 +32,7 @@ public sealed partial class SidecarOperatorConsole : IOperatorConsole, IApproval
 
     public event Action? Changed;
 
-    public string WorkspacePath => workspace.WatchedSolutionPath ?? "(no watched workspace)";
+    public string WorkspacePath => workspace.BasePath;
 
     public ConsoleStatus Status => new(stream.Connected, stream.ActiveTurn is not null);
 
@@ -66,15 +65,13 @@ public sealed partial class SidecarOperatorConsole : IOperatorConsole, IApproval
         }
     }
 
-    public async Task SendAsync(string prompt, bool autoApprove)
+    public async Task SendAsync(string prompt)
     {
         AgentToolPolicy policy = agentSettings.Current;
+        // Basic: no tool policy — just the operator's model + reasoning choice.
+        // (autoApprove is unused; every tool call pauses at the operator gate.)
         object toolPolicy = new
         {
-            allowNativeReads = policy.AllowNativeReads,
-            strictMcpConfig = policy.StrictMcpConfig,
-            enabledTools = policy.EnabledOptionalTools.ToArray(),
-            autoApprove,
             model = policy.Model,
             effort = policy.Effort,
         };

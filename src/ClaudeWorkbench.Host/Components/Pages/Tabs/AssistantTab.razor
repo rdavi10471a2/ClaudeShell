@@ -12,11 +12,6 @@
                         @onclick="OpenActivityAsync">
                     <RadzenIcon Icon="monitoring" />
                 </button>
-                <label class="composer-check"
-                       title="Auto-approve claude-workbench edits for THIS thread only. The merge review still gates every write to watched source; New Thread turns it back off.">
-                    <input type="checkbox" @bind="autoApprove" />
-                    <span>Auto-approve</span>
-                </label>
             </div>
             @if (uploadError is not null)
             {
@@ -52,7 +47,7 @@
                       class="chat-composer-input"
                       @bind="draft"
                       @bind:event="oninput"
-                      placeholder="Inspect the current workspace..."></textarea>
+                      placeholder="Ask Claude..."></textarea>
             <div class="chat-composer-actions">
                 <span class="composer-actions-spacer" aria-hidden="true"></span>
                 @if (Working)
@@ -172,7 +167,7 @@
                     {
                         <div class="empty">
                             <div class="empty-icon">&#128172;</div>
-                            <div>No messages yet. Ask Claude to inspect the watched solution.</div>
+                            <div>No messages yet.</div>
                         </div>
                     }
                     else

@@ -1,6 +1,3 @@
-using AIMonitor.Core;
-using AIMonitor.McpServer;
-
 namespace ClaudeWorkbench.Host.Services;
 
 // Operator file attachments. Files land in the workspace runtime's uploads/ folder
@@ -22,9 +19,7 @@ public sealed class UploadService
     {
         get
         {
-            return workspace.HasWorkspace
-                ? Path.Combine(MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(workspace.Settings), "uploads")
-                : null;
+            return workspace.HasWorkspace ? workspace.FilesDirectory : null;
         }
     }
 

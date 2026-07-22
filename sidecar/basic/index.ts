@@ -1,59 +1,37 @@
 import express from "express";
 import { randomUUID } from "node:crypto";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import {
   query,
   type CanUseTool,
   type Options,
+  type PermissionResult,
   type Query,
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { EventBus } from "./bus.js";
+import { OperatorGate, baseName } from "./gate.js";
 import type { SidecarEvent } from "./events.js";
 
-// --- config -------------------------------------------------------
+// --- config -------------------------------------------------------------
+// ClaudeShell BasicSidecar: stock Claude with all native tools available. No
+// governance, no MCP, no deny-by-default. Every tool call is surfaced to the
+// operator's Allow/Deny gate (the real client always asks) except the two
+// agent-bookkeeping tools below.
 const SIDECAR_PORT = Number(process.env.SIDECAR_PORT ?? 6110);
-const WORKBENCH_MCP_URL =
-  process.env.WORKBENCH_MCP_URL ?? "http://localhost:6100/mcp";
-const MCP_SERVER_NAME = "claude-workbench";
-const HOST_BASE = WORKBENCH_MCP_URL.replace(/\/mcp\/?$/, "");
 
-// Agent's working directory (optional, auto-derived from host /health).
-let workspaceCwd: string | undefined;
-// Operator-uploaded files directory.
-let uploadsDir: string | undefined;
+// The agent's working directory (where Read/Write/Bash etc. operate). Provided
+// by the host at launch (WORKSPACE); falls back to the SDK default if unset.
+const workspaceCwd: string | undefined = process.env.WORKSPACE || undefined;
+// Optional extra read-only directory (operator uploads) granted to the agent.
+const uploadsDir: string | undefined = process.env.UPLOADS_DIR || undefined;
 
-async function resolveWorkspaceCwd(): Promise<void> {
-  const timeoutMs = 30000;
-  const startTime = Date.now();
+// Tools that never prompt — pure agent bookkeeping, not observable actions.
+const AUTO_ALLOWED = new Set<string>(["TodoWrite", "ToolSearch"]);
 
-  while (Date.now() - startTime < timeoutMs) {
-    try {
-      const response = await fetch(`${HOST_BASE}/health`);
-      if (response.ok) {
-        const info = (await response.json()) as {
-          watchedSolutionPath?: string;
-          uploadsPath?: string;
-        };
-        if (info.watchedSolutionPath) {
-          const { dirname } = await import("node:path");
-          workspaceCwd = dirname(info.watchedSolutionPath);
-        }
-        uploadsDir = info.uploadsPath ?? undefined;
-        console.log("[sidecar] workspace resolved:", workspaceCwd);
-        return;
-      }
-    } catch {
-      // host not listening yet
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-
-  console.warn(`[sidecar] workspace not resolved after ${timeoutMs / 1000}s`);
-}
-
-// --- minimal content-block shapes --------------------------------
+// --- minimal content-block shapes we read off SDK messages --------------
 interface TextBlock {
   type: "text";
   text: string;
@@ -64,15 +42,57 @@ interface ToolUseBlock {
   name: string;
   input: unknown;
 }
+interface ToolResultBlock {
+  type: "tool_result";
+  tool_use_id: string;
+  is_error?: boolean;
+}
 type ContentBlock =
   | TextBlock
   | ToolUseBlock
+  | ToolResultBlock
   | { type: string; [key: string]: unknown };
 
-// --- wiring --------------------------------------------------------
-const bus = new EventBus();
+function filePathOf(input: unknown): string | undefined {
+  if (input && typeof input === "object") {
+    const record = input as Record<string, unknown>;
+    for (const key of ["path", "file_path", "sourceFilePath", "filePath"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.length > 0) {
+        return value;
+      }
+    }
+  }
+  return undefined;
+}
 
-// Async-iterable input stream for the query.
+// --- wiring -------------------------------------------------------------
+const bus = new EventBus();
+const gate = new OperatorGate();
+let activeTurn: string | null = null;
+// Current thread's SDK session id, captured from the message stream and passed as
+// `resume` on the next turn so the agent remembers the conversation. Null = fresh thread.
+let currentSessionId: string | null = null;
+// AskUserQuestion elicitations awaiting operator answers (mirrors the gate registry).
+const elicitations = new Map<string, { resolve: (answers: Record<string, unknown>) => void; questions: unknown }>();
+
+// Per-turn options from the operator's settings. Only model + effort are honored;
+// there is no tool policy (all tools available, every call gated).
+interface ToolPolicy {
+  model: string;
+  effort: string;
+}
+
+const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+// The long-lived streaming query for the current thread + its input stream.
+let activeQuery: Query | null = null;
+let activeInput: InputStream | null = null;
+
+// Async-iterable input backed by a queue we push operator turns into. Ending it
+// completes the query (New Thread). This is what makes it streaming-input mode,
+// which is the only mode that exposes the Query control handle (interrupt /
+// getContextUsage / getUsage).
 class InputStream {
   private readonly queue: SDKUserMessage[] = [];
   private waiter: ((r: IteratorResult<SDKUserMessage>) => void) | null = null;
@@ -123,23 +143,18 @@ class InputStream {
   }
 }
 
-let activeTurn: string | null = null;
-let activeQuery: Query | null = null;
-let activeInput: InputStream | null = null;
-let currentSessionId: string | null = null;
-
-// AskUserQuestion elicitations awaiting operator answers.
-const elicitations = new Map<string, { resolve: (answers: Record<string, unknown>) => void; questions: unknown }>();
-
-// BasicSidecar: all tools allowed. No governance, no deny-by-default, no gates.
 const canUseTool: CanUseTool = async (toolName, input, { signal }) => {
-  // AskUserQuestion: route to elicitation dialog.
+  const turnId = activeTurn ?? "unknown";
+
+  // AskUserQuestion is the agent asking the operator a clarifying question. Route it
+  // to the elicitation dialog and return the operator's answers as updatedInput
+  // (per the Agent SDK contract: { questions, answers }).
   if (toolName === "AskUserQuestion") {
     const elicitationId = randomUUID();
     const questions = (input as { questions?: unknown }).questions ?? [];
     const answers = await new Promise<Record<string, unknown>>((resolve) => {
       elicitations.set(elicitationId, { resolve, questions });
-      bus.emit({ type: "elicitation_request", turnId: activeTurn ?? "", elicitationId, questions });
+      bus.emit({ type: "elicitation_request", turnId, elicitationId, questions });
       const onAbort = () => {
         if (elicitations.delete(elicitationId)) {
           resolve({});
@@ -147,58 +162,86 @@ const canUseTool: CanUseTool = async (toolName, input, { signal }) => {
       };
       signal.addEventListener("abort", onAbort, { once: true });
     });
-    bus.emit({ type: "elicitation_resolved", turnId: activeTurn ?? "", elicitationId });
+    bus.emit({ type: "elicitation_resolved", turnId, elicitationId });
     return { behavior: "allow", updatedInput: { ...(input as object), questions, answers } };
   }
 
-  // Allow everything by default.
-  return { behavior: "allow", updatedInput: input };
-};
-
-async function ensureSession(model: string = "", effort: string = ""): Promise<void> {
-  if (activeQuery !== null) {
-    return; // Session already running.
+  // Agent bookkeeping tools proceed silently.
+  if (AUTO_ALLOWED.has(baseName(toolName))) {
+    return { behavior: "allow", updatedInput: input };
   }
 
-  await resolveWorkspaceCwd();
+  // Everything else pauses at the operator's Allow/Deny gate.
+  const tool = baseName(toolName);
+  const { gateId, decided } = gate.request(tool, input, filePathOf(input));
+  bus.emit({
+    type: "gate_request",
+    turnId,
+    gateId,
+    tool,
+    input,
+    filePath: filePathOf(input),
+  });
+
+  const onAbort = () => gate.resolve(gateId, "deny", "aborted");
+  signal.addEventListener("abort", onAbort, { once: true });
+  const resolution = await decided;
+  signal.removeEventListener("abort", onAbort);
+
+  bus.emit({
+    type: "gate_resolved",
+    turnId,
+    gateId,
+    decision: resolution.decision,
+    reason: resolution.reason,
+  });
+
+  const result: PermissionResult =
+    resolution.decision === "allow"
+      ? { behavior: "allow", updatedInput: input }
+      : { behavior: "deny", message: resolution.reason ?? "Operator rejected" };
+  return result;
+};
+
+// Lazily create the long-lived streaming query for the current thread. Options are
+// set ONCE here (per session): cwd, tool surface, resume. Only the message content
+// is per-turn (see submitTurn).
+async function ensureSession(policy: ToolPolicy): Promise<void> {
+  if (activeQuery) {
+    return;
+  }
 
   const input = new InputStream();
   activeInput = input;
 
   const options: Options = {
-    // Register MCP servers if needed (optional).
-    ...(WORKBENCH_MCP_URL
-      ? {
-          mcpServers: {
-            [MCP_SERVER_NAME]: { type: "http", url: WORKBENCH_MCP_URL },
-          },
-        }
-      : {}),
     canUseTool,
     permissionMode: "default",
-    // Stock Claude prompt, no governance card.
-    systemPrompt: { type: "preset", preset: "claude_code" },
-    // Optional model + effort overrides.
-    ...(model ? { model } : {}),
-    ...(effort && ["low", "medium", "high", "xhigh", "max"].includes(effort) 
-      ? { effort: effort as Options["effort"] } 
-      : {}),
-    cwd: workspaceCwd,
-    // Operator uploads accessible.
+    // Empty ON PURPOSE — the shell injects nothing. The SDK spawns the Claude Code
+    // CLI, whose coding-agent prompt is built in; omitting systemPrompt would fall
+    // back to that. An explicit string REPLACES it, and the empty string is the
+    // closest the SDK offers to "no prompt at all". Forks put their role card here.
+    systemPrompt: "",
+    // Operator-selected model + reasoning effort (empty => inherit the default).
+    ...(policy.model ? { model: policy.model } : {}),
+    ...(EFFORT_LEVELS.has(policy.effort) ? { effort: policy.effort as Options["effort"] } : {}),
+    ...(workspaceCwd ? { cwd: workspaceCwd } : {}),
+    // Operator uploads sit outside cwd; grant read there so the agent can Read them.
     ...(uploadsDir ? { additionalDirectories: [uploadsDir] } : {}),
-    // No tool restrictions, no isolation.
+    // All native tools available — nothing denied.
     disallowedTools: [],
-    strictMcpConfig: false,
-    // Allow filesystem settings (Claude settings work normally).
+    // SDK isolation mode: load NO filesystem settings (no personal ~/.claude leak,
+    // no CLAUDE.md injection). A fork can flip this to ["user"] to inherit settings.
     settingSources: [],
-    // Resume thread if we have a session id.
+    // Resume the thread's session (restore after a process restart). Within a live
+    // process the session persists in the query handle itself.
     ...(currentSessionId ? { resume: currentSessionId } : {}),
   };
 
   const q = query({ prompt: input.stream(), options }) as unknown as Query;
   activeQuery = q;
 
-  // Background read loop: drain the query's output.
+  // Background read loop: drain the query's output for the life of the thread.
   void (async () => {
     try {
       for await (const message of q as AsyncIterable<SDKMessage>) {
@@ -210,7 +253,8 @@ async function ensureSession(model: string = "", effort: string = ""): Promise<v
         bus.emit({ type: "error", message: detail });
       }
     } finally {
-      // Clear thread state if this query is still active.
+      // Only clear the shared thread state if it STILL belongs to this query. A new
+      // thread may have already replaced activeQuery before this loop's finally runs.
       if (activeQuery === q) {
         activeQuery = null;
         activeInput = null;
@@ -220,8 +264,9 @@ async function ensureSession(model: string = "", effort: string = ""): Promise<v
   })();
 }
 
-async function submitTurn(prompt: string, turnId: string, model: string = "", effort: string = ""): Promise<void> {
-  await ensureSession(model, effort);
+// Push one operator turn into the live session's input stream.
+async function submitTurn(prompt: string, turnId: string, policy: ToolPolicy): Promise<void> {
+  await ensureSession(policy);
   activeTurn = turnId;
   bus.emit({ type: "turn_started", turnId });
   bus.emit({ type: "user_prompt", turnId, text: prompt });
@@ -229,7 +274,7 @@ async function submitTurn(prompt: string, turnId: string, model: string = "", ef
 }
 
 function handleMessage(message: SDKMessage): void {
-  // Capture session id for thread resumption.
+  // Every SDK message carries the session id; capture it so the thread can resume.
   const sessionId = (message as { session_id?: string }).session_id;
   if (typeof sessionId === "string" && sessionId.length > 0) {
     currentSessionId = sessionId;
@@ -250,128 +295,253 @@ function handleMessage(message: SDKMessage): void {
             type: "tool_call_started",
             turnId,
             callId: toolBlock.id,
-            tool: toolBlock.name,
+            tool: baseName(toolBlock.name),
             input: toolBlock.input,
           });
         }
       }
       if (usage) {
-        bus.emit({ type: "usage", turnId, usage });
+        bus.emit({
+          type: "usage",
+          turnId,
+          inputTokens: usage.input_tokens,
+          outputTokens: usage.output_tokens,
+        });
       }
       break;
     }
-
+    case "user": {
+      const content = message.message.content;
+      if (Array.isArray(content)) {
+        for (const block of content as ContentBlock[]) {
+          if (block.type === "tool_result") {
+            const resultBlock = block as ToolResultBlock;
+            bus.emit({
+              type: "tool_call_finished",
+              turnId,
+              callId: resultBlock.tool_use_id,
+              tool: "",
+              ok: resultBlock.is_error !== true,
+            });
+          }
+        }
+      }
+      break;
+    }
     case "result": {
-      const result = message as { type: string; content?: unknown; is_error?: boolean };
-      // Tool result from the SDK
+      if (message.subtype === "success") {
+        bus.emit({
+          type: "usage",
+          turnId,
+          inputTokens: message.usage.input_tokens,
+          outputTokens: message.usage.output_tokens,
+        });
+      }
       bus.emit({
-        type: "tool_result",
+        type: "turn_finished",
         turnId,
-        callId: "",
-        result: result.content,
-        isError: result.is_error ?? false,
+        stopReason: message.subtype,
       });
+      activeTurn = null;
       break;
     }
-
-    default: {
-      // Other message types (stream_event, tool_progress, etc.) - just log
+    default:
       break;
-    }
   }
 }
 
-// --- HTTP server: stream events to host ----
+// --- HTTP surface for the Blazor host -----------------------------------
 const app = express();
+app.use(express.json({ limit: "2mb" }));
 
-app.use(express.json());
-
-// POST /prompt: submit a turn.
-app.post("/prompt", express.json(), async (req: express.Request, res: express.Response) => {
-  const { prompt, turnId, model, effort } = req.body as Record<string, unknown>;
-  if (!prompt || !turnId) {
-    res.status(400).json({ error: "missing prompt or turnId" });
+// The control surface is localhost-only. Bind to loopback (app.listen below) AND
+// reject any request whose Host header isn't localhost, plus any browser request
+// carrying a non-local Origin (DNS-rebinding defense). The Blazor host talks over
+// 127.0.0.1 and sends no Origin, so it is unaffected.
+app.use((req, res, next) => {
+  const host = (req.headers.host ?? "").split(":")[0];
+  if (host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]" && host !== "::1") {
+    res.status(403).json({ error: "forbidden host" });
     return;
   }
-
-  try {
-    await submitTurn(
-      String(prompt),
-      String(turnId),
-      String(model ?? ""),
-      String(effort ?? ""),
-    );
-    res.json({ ok: true });
-  } catch (error) {
-    res.status(500).json({ error: String(error) });
-  }
-});
-
-// POST /gate/:gateId: resolve an elicitation (answer questions).
-app.post("/elicitation/:elicitationId/resolve", express.json(), (req: express.Request, res: express.Response) => {
-  const { elicitationId } = req.params;
-  const { answers } = req.body as Record<string, unknown>;
-
-  const elicitation = elicitations.get(elicitationId);
-  if (!elicitation) {
-    res.status(404).json({ error: "elicitation not found" });
+  const origin = req.headers.origin;
+  if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin)) {
+    res.status(403).json({ error: "forbidden origin" });
     return;
   }
-
-  elicitations.delete(elicitationId);
-  elicitation.resolve(answers as Record<string, unknown> ?? {});
-  res.json({ ok: true });
+  next();
 });
 
-// GET /health: check sidecar health.
-app.get("/health", (_req: express.Request, res: express.Response) => {
-  res.json({ status: "ok", hasActiveQuery: activeQuery !== null });
-});
-
-// GET /events: Server-Sent Events stream.
-app.get("/events", (req: express.Request, res: express.Response) => {
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-
-  const handler = (event: SidecarEvent) => {
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
-  };
-
-  bus.on(handler);
-
-  req.on("close", () => {
-    bus.off(handler);
-    res.end();
+app.get("/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    activeTurn,
+    pendingGates: gate.list().length,
   });
 });
 
-// POST /interrupt: interrupt the active query.
-app.post("/interrupt", (_req: express.Request, res: express.Response) => {
-  if (!activeQuery) {
-    res.status(400).json({ error: "no active query" });
-    return;
-  }
+// Claude login state, so the host's command-bar dot reflects authentication rather
+// than mere sidecar liveness. The sidecar owns the Claude CLI relationship.
+//   null  = unknown (CLI missing, timed out, or output unparseable) — NOT "signed out"
+//   true  = loggedIn: true
+//   false = loggedIn: false
+const execAsync = promisify(exec);
+const AUTH_TTL_MS = 20_000;
+let claudeAuthCache: { loggedIn: boolean | null; at: number } = { loggedIn: null, at: 0 };
 
+function parseLoggedIn(output: string): boolean | null {
   try {
-    activeQuery.interrupt();
-    res.json({ ok: true });
-  } catch (error) {
-    res.status(500).json({ error: String(error) });
+    const parsed = JSON.parse(output) as { loggedIn?: unknown };
+    if (typeof parsed.loggedIn === "boolean") {
+      return parsed.loggedIn;
+    }
+  } catch {
+    // Not JSON — fall through to a textual sniff for forward-compatibility.
   }
+  if (/loggedIn["']?\s*[:=]\s*true/i.test(output)) return true;
+  if (/loggedIn["']?\s*[:=]\s*false/i.test(output)) return false;
+  return null;
+}
+
+async function probeClaudeAuth(): Promise<boolean | null> {
+  try {
+    const { stdout } = await execAsync("claude auth status", {
+      windowsHide: true,
+      timeout: 10_000,
+    });
+    return parseLoggedIn(stdout);
+  } catch (err) {
+    const out = (err as { stdout?: unknown })?.stdout;
+    return typeof out === "string" && out.length > 0 ? parseLoggedIn(out) : null;
+  }
+}
+
+app.get("/auth", async (_req, res) => {
+  const now = Date.now();
+  if (now - claudeAuthCache.at > AUTH_TTL_MS) {
+    claudeAuthCache = { loggedIn: await probeClaudeAuth(), at: now };
+  }
+  res.json({ loggedIn: claudeAuthCache.loggedIn });
 });
 
-// POST /new-thread: end the current thread and start a new one.
-app.post("/new-thread", (_req: express.Request, res: express.Response) => {
-  if (activeInput) {
-    activeInput.end();
-    currentSessionId = null; // Start fresh.
+// Live token/context + subscription usage, read straight off the Query handle.
+// Both methods are experimental in the SDK (guarded); null until a thread exists.
+app.get("/usage", async (_req, res) => {
+  const q = activeQuery as unknown as {
+    getContextUsage?: () => Promise<unknown>;
+    usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: () => Promise<unknown>;
+  } | null;
+  if (!q) {
+    res.json({ context: null, subscription: null });
+    return;
   }
+  let context: unknown = null;
+  let subscription: unknown = null;
+  try {
+    if (typeof q.getContextUsage === "function") {
+      context = await q.getContextUsage();
+    }
+  } catch {
+    context = null;
+  }
+  try {
+    if (typeof q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET === "function") {
+      subscription = await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+    }
+  } catch {
+    subscription = null;
+  }
+  res.json({ context, subscription });
+});
+
+app.get("/events", (_req, res) => {
+  bus.addClient(res);
+});
+
+app.post("/prompt", (req, res) => {
+  if (activeTurn) {
+    res.status(409).json({ error: "A turn is already active.", activeTurn });
+    return;
+  }
+  const prompt = (req.body?.prompt ?? "").toString();
+  if (!prompt.trim()) {
+    res.status(400).json({ error: "prompt is required." });
+    return;
+  }
+  const raw = (req.body?.toolPolicy ?? {}) as Partial<ToolPolicy>;
+  const policy: ToolPolicy = {
+    model: typeof raw.model === "string" ? raw.model : "",
+    effort: typeof raw.effort === "string" ? raw.effort : "",
+  };
+  const turnId = randomUUID();
+  activeTurn = turnId;
+  void submitTurn(prompt, turnId, policy);
+  res.status(202).json({ turnId });
+});
+
+app.post("/stop", (_req, res) => {
+  if (activeQuery && activeTurn) {
+    void activeQuery.interrupt();
+    res.json({ stopped: true });
+    return;
+  }
+  res.json({ stopped: false });
+});
+
+app.get("/gates", (_req, res) => {
+  res.json(gate.list());
+});
+
+app.post("/gates/:id", (req, res) => {
+  const decision = req.body?.decision;
+  if (decision !== "allow" && decision !== "deny") {
+    res.status(400).json({ error: "decision must be 'allow' or 'deny'." });
+    return;
+  }
+  const ok = gate.resolve(req.params.id, decision, req.body?.reason);
+  res.status(ok ? 200 : 404).json({ resolved: ok });
+});
+
+app.get("/elicitations", (_req, res) => {
+  res.json(
+    [...elicitations.entries()].map(([elicitationId, entry]) => ({
+      elicitationId,
+      questions: entry.questions,
+    })),
+  );
+});
+
+app.post("/elicitations/:id", (req, res) => {
+  const entry = elicitations.get(req.params.id);
+  if (!entry) {
+    res.status(404).json({ resolved: false });
+    return;
+  }
+  elicitations.delete(req.params.id);
+  entry.resolve((req.body?.answers as Record<string, unknown>) ?? {});
+  res.json({ resolved: true });
+});
+
+app.post("/new-thread", (_req, res) => {
+  if (activeTurn) {
+    res.status(409).json({ error: "Cannot start a new thread while a turn is active." });
+    return;
+  }
+  activeInput?.end();
+  activeQuery = null;
+  activeInput = null;
+  currentSessionId = null;
+  elicitations.clear();
+  bus.clear();
+  bus.emit({ type: "thread_reset", turnId: "thread" });
   res.json({ ok: true });
 });
 
-const port = SIDECAR_PORT;
-app.listen(port, () => {
-  console.log(`[sidecar] BasicSidecar listening on http://localhost:${port}`);
-  console.log(`[sidecar] All native tools allowed. No governance. Stock Claude.`);
+app.listen(SIDECAR_PORT, "127.0.0.1", () => {
+  const banner: SidecarEvent = {
+    type: "error",
+    message: `BasicSidecar listening on :${SIDECAR_PORT} (cwd: ${workspaceCwd ?? "default"})`,
+  };
+  // eslint-disable-next-line no-console
+  console.log(banner.message);
 });

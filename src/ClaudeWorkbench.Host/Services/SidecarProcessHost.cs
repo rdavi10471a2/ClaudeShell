@@ -10,12 +10,14 @@ namespace ClaudeWorkbench.Host.Services;
 public sealed class SidecarProcessHost : IHostedService, IDisposable
 {
     private readonly SidecarLaunchOptions options;
+    private readonly WorkspaceManager workspace;
     private readonly ILogger<SidecarProcessHost> logger;
     private Process? process;
 
-    public SidecarProcessHost(SidecarLaunchOptions options, ILogger<SidecarProcessHost> logger)
+    public SidecarProcessHost(SidecarLaunchOptions options, WorkspaceManager workspace, ILogger<SidecarProcessHost> logger)
     {
         this.options = options;
+        this.workspace = workspace;
         this.logger = logger;
     }
 
@@ -53,7 +55,8 @@ public sealed class SidecarProcessHost : IHostedService, IDisposable
         };
         startInfo.ArgumentList.Add(script);
         startInfo.Environment["SIDECAR_PORT"] = options.Port.ToString();
-        startInfo.Environment["WORKBENCH_MCP_URL"] = options.McpUrl;
+        startInfo.Environment["WORKSPACE"] = workspace.BasePath;
+        startInfo.Environment["UPLOADS_DIR"] = workspace.FilesDirectory;
 
         try
         {

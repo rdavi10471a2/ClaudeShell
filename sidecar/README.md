@@ -1,40 +1,47 @@
-# ClaudeShell Sidecars
+# ClaudeShell Sidecar
 
-This folder contains Claude Agent SDK drivers for ClaudeShell. Each sidecar is a Node/TypeScript process that spawns Claude via the Agent SDK and streams events back to the Blazor host over SSE.
+`basic/` is the **BasicSidecar** — the Node/TypeScript process that drives Claude via
+the **Claude Agent SDK** and streams events back to the Blazor host over SSE.
 
-## Folder Structure
+## What it does (and deliberately doesn't)
 
-### `/basic` — **Default: BasicSidecar**
-The clean Claude shell sidecar. **All native tools allowed.** No governance, no gates, no workflow orchestration. Stock Claude with optional MCP server registration.
+- **Plain Claude.** `systemPrompt: ""` — the shell injects nothing. (Omitting the
+  option would fall back to the CLI's built-in Claude-Code prompt; an explicit string
+  replaces it.) `settingSources: []` — no CLAUDE.md, no `~/.claude` settings leak.
+- **All native tools available** — `disallowedTools: []`, no MCP servers, no deny lists.
+- **Every tool call asks the operator.** `canUseTool` pauses each call at an
+  Allow/Deny gate (`gate_request` → operator decision → `gate_resolved`). Only
+  `TodoWrite`/`ToolSearch` (agent bookkeeping) and `AskUserQuestion` (routed to the
+  questions dialog instead) skip the gate.
+- **Session continuity** — streaming-input query, `resume` across restarts,
+  interrupt, live context/subscription usage off the Query handle.
 
-**Use this for:** The base ClaudeShell experience.
+## HTTP surface (what the host binds to)
 
-### `/samples/ai-monitor-workflow` — **Example: AIMonitor Governance**
-The original ClaudeWorkbench sidecar preserved as a **reference implementation**. Shows how to layer back:
-- File-mutation gating via `OperatorGate`
-- Governed role card injection
-- Deny-by-default tool policy
-- Staged review gates
+| Endpoint | Purpose |
+|---|---|
+| `GET /events` | SSE stream of sidecar events (with bounded replay) |
+| `POST /prompt` | submit a turn `{ prompt, toolPolicy: { model, effort } }` |
+| `GET/POST /gates[/:id]` | pending permission gates / resolve one (`allow`/`deny`) |
+| `GET/POST /elicitations[/:id]` | pending AskUserQuestion prompts / answer one |
+| `POST /stop` · `POST /new-thread` | interrupt · fresh thread |
+| `GET /usage` · `GET /auth` · `GET /health` | usage meters · Claude login state · liveness |
 
-**Use this for:** Understanding how to add governance, staging, and workflow orchestration to ClaudeShell (e.g., if you're building a fork with operator oversight).
+Environment: `SIDECAR_PORT` (default 6110), `WORKSPACE` (agent cwd), `UPLOADS_DIR`
+(extra read directory for composer attachments). The host sets all three when it
+launches the sidecar.
 
-## Building
-
-Each sidecar directory has its own `package.json` and `tsconfig.json`.
+## Build
 
 ```bash
 cd basic
 npm install
-npm run build
-npm start
+npm run build   # -> dist/  (the host launches dist/index.js)
 ```
 
-## Next Steps
+## Forking
 
-- **To customize BasicSidecar:** Edit `basic/index.ts`. The `canUseTool` hook is where tool permissions live (currently: allow all).
-- **To rebuild governance:** Copy `samples/ai-monitor-workflow/src/` patterns (gate.ts, events.ts) and adapt them to your needs.
-- **To add MCP servers:** Update `canUseTool` or the SDK `mcpServers` config in `index.ts`.
-
----
-
-**ClaudeShell philosophy:** The sidecar is just a Claude wrapper. Governance, workflows, and domain-specific logic belong *outside* this shell — in MCP servers, fork-specific configs, or the Blazor host. Keep it simple, keep it extensible.
+`basic/index.ts` is the whole policy surface: put a role card in `systemPrompt`,
+register domain MCP servers in the SDK options, narrow or widen the gate in
+`canUseTool`. The event contract (`events.ts`) is what the host UI binds to — keep it
+stable and the UI keeps working.

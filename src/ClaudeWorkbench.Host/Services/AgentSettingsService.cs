@@ -1,5 +1,4 @@
 using System.Text.Json;
-using AIMonitor.McpServer;
 using ClaudeWorkbench.Host.Console;
 
 namespace ClaudeWorkbench.Host.Services;
@@ -18,7 +17,7 @@ public sealed class AgentSettingsService
         // Monitor-general setting (not per-watched-solution), so it lives with the
         // monitor's own config next to appsettings.json — keyed off the stable
         // monitor repo root, not any per-solution runtime path.
-        path = Path.Combine(workspace.RepositoryRoot, "config", "agent-settings.json");
+        path = Path.Combine(workspace.BasePath, "agent-settings.json");
         policy = Load();
     }
 
@@ -55,7 +54,6 @@ public sealed class AgentSettingsService
                 AgentToolPolicy? loaded = JsonSerializer.Deserialize<AgentToolPolicy>(File.ReadAllText(path), json);
                 if (loaded is not null)
                 {
-                    loaded.EnabledOptionalTools = new HashSet<string>(loaded.EnabledOptionalTools, StringComparer.Ordinal);
                     return loaded;
                 }
             }

@@ -2,25 +2,15 @@
 
 <PageTitle>@PageTitleText</PageTitle>
 
-@* Faithful Coding Services shell (command bar + work panel + RadzenTabs), ported
-   from CodexAppServerDemo. Binds only to IOperatorConsole — no sidecar/Claude
-   types reach the UI. Branding: the Coding Services logo + the "Powered by
-   Coding Services" line beside ClaudeWorkbench. *@
+@* ClaudeWorkbench --Basic: a plain Claude shell. Command bar + the assistant tab,
+   backed by the BasicSidecar. No governance, no source/git/tasks, no indexing. *@
 
-@if (!Workspace.HasWorkspace)
-{
-    <WorkspacePicker Embedded="true" OnClose="@CloseWorkspacePicker" />
-}
-else
-{
 <section class="control-screen">
     <header class="command-bar">
         <div class="title-strip">
             <div class="brand-lockup">
-                <img class="brand-logo" src="images/cs_header_logo_56x40.svg" alt="Coding Services" />
                 <div class="brand-text">
-                    <h1>ClaudeWorkbench</h1>
-                    <div class="brand-tagline">Powered by Coding Services</div>
+                    <h1>ClaudeWorkbench <span class="brand-basic">--Basic</span></h1>
                 </div>
             </div>
         </div>
@@ -29,72 +19,29 @@ else
                 <span class="wb-flag" title="@ClaudeCue.Title">
                     <span class="wb-dot @ClaudeCue.Css"></span>@ClaudeCue.Label
                 </span>
-                <span class="wb-flag" title="@GitHubCue.Title">
-                    <span class="wb-dot @GitHubCue.Css"></span>@GitHubCue.Label
-                </span>
             </span>
             <RadzenButton Icon="help_outline"
                           Text="Help"
                           ButtonStyle="ButtonStyle.Light"
                           Size="ButtonSize.Small"
-                          Title="How ClaudeWorkbench works — the governed loop, tabs, and controls"
+                          Title="How ClaudeWorkbench --Basic works"
                           Click="@(() => helpOpen = true)" />
             <button type="button" class="wb-about-link" @onclick="@(() => aboutOpen = true)" title="What is best in life?">About</button>
             <RadzenButton Icon="settings"
                           Text="Settings"
                           ButtonStyle="ButtonStyle.Light"
                           Size="ButtonSize.Small"
-                          Title="Agent settings — model, reasoning level, native read tools"
+                          Title="Agent settings — model, reasoning level"
                           Click="@(() => settingsOpen = true)" />
         </div>
     </header>
 
     <main class="control-grid">
         <section class="work-panel">
-            <div class="workspace-toolbar">
-                <div class="workspace-path">
-                    <strong>@Session.WorkspacePath</strong>
-                </div>
-                <div class="workspace-state">
-                    @if (IndexStatus.IsRebuilding)
-                    {
-                        <span class="workspace-state-text workspace-state-text-live" title="Building the solution index — the agent can reason over the code once this finishes.">
-                            <span class="workspace-state-spinner" aria-hidden="true"></span>
-                            <span>Indexing</span>
-                        </span>
-                    }
-                    else if (Session.Status.Working)
-                    {
-                        <span class="workspace-state-text workspace-state-text-live">
-                            <span class="workspace-state-spinner" aria-hidden="true"></span>
-                            <span>Thinking</span>
-                        </span>
-                    }
-                    else
-                    {
-                        <span class="workspace-state-text">Ready</span>
-                    }
-                </div>
-            </div>
-
             <RadzenTabs RenderMode="TabRenderMode.Client">
                 <Tabs>
-                    @* Tasks tab disabled until the thread<->task workflow is built (see
-                       docs/ThreadTaskWorkflow.md). The board + task MCP tools still exist, but
-                       the sidecar role card is now free-flowing (opt-in), so nothing ties a turn
-                       to a task. Re-enable by uncommenting.
-                    <RadzenTabsItem Text="Tasks">
-                        <TasksTab WorkspaceRoot="@Session.WorkspacePath" />
-                    </RadzenTabsItem>
-                    *@
-                    <RadzenTabsItem Text="Workbench">
+                    <RadzenTabsItem Text="Assistant">
                         <AssistantTab />
-                    </RadzenTabsItem>
-                    <RadzenTabsItem Text="Source">
-                        <SourcePanel />
-                    </RadzenTabsItem>
-                    <RadzenTabsItem Text="Git">
-                        <GitTab />
                     </RadzenTabsItem>
                 </Tabs>
             </RadzenTabs>
@@ -117,4 +64,3 @@ else
     }
 
 </section>
-}
