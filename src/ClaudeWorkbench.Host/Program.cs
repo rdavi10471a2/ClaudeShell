@@ -61,6 +61,8 @@ var app = builder.Build();
 app.UseStaticFiles();
 app.UseAntiforgery();
 
+app.MapLocalFiles();   // serves chat-referenced local files (see LocalFileEndpoints)
+
 app.MapGet("/health", (WorkspaceManager workspace) => Results.Json(new
 {
     status = "ok",

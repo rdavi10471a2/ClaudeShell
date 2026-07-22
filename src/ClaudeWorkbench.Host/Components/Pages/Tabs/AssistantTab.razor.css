@@ -617,6 +617,12 @@
     overflow-wrap: anywhere;
 }
 
+.message-body ::deep img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+}
+
 .message-body ::deep p:first-child {
     margin-top: 0;
 }
