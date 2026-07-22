@@ -14,6 +14,8 @@ namespace ClaudeWorkbench.Host.Services;
 // page served over http://localhost — links are blocked and <img> tags show the broken
 // glyph. So after parsing we walk the AST and rewrite any link/image URL that points at
 // a local file to the /local-file endpoint (see LocalFileEndpoints), which streams it.
+// A plain LINK to a local image is upgraded to an inline image, since agents commonly
+// write [name](path) instead of ![name](path); links that stay links open in a new tab.
 public static class MarkdownRenderer
 {
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
@@ -23,6 +25,11 @@ public static class MarkdownRenderer
     // Rooted Windows path ("C:\..." or "C:/...") or UNC ("\\server\share\...").
     private static readonly Regex LocalPathPattern = new(
         @"^(?:[A-Za-z]:[\\/]|\\\\)", RegexOptions.Compiled);
+
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".avif",
+    };
 
     public static string ToHtml(string? markdown)
     {
@@ -46,17 +53,22 @@ public static class MarkdownRenderer
     {
         foreach (LinkInline link in document.Descendants<LinkInline>())
         {
-            string? rewritten = TryRewrite(link.Url);
-            if (rewritten is null)
+            string? localPath = ResolveLocalPath(link.Url);
+            if (localPath is not null)
             {
-                continue;
+                link.Url = "/local-file?path=" + Uri.EscapeDataString(localPath);
+
+                // A link that points at a local IMAGE renders inline, even when the
+                // agent wrote [name](path) rather than ![name](path).
+                if (ImageExtensions.Contains(Path.GetExtension(localPath)))
+                {
+                    link.IsImage = true;
+                }
             }
 
-            link.Url = rewritten;
-
-            // Local non-image links open in a new tab; navigating the app tab away
-            // would drop the Blazor circuit.
-            if (!link.IsImage)
+            // Anything that stays a link (local non-image, or an external URL) opens
+            // in a new tab; navigating the app tab away would drop the Blazor circuit.
+            if (!link.IsImage && (localPath is not null || IsExternalHttp(link.Url)))
             {
                 HtmlAttributes attributes = link.GetAttributes();
                 attributes.AddPropertyIfNotExist("target", "_blank");
@@ -65,30 +77,27 @@ public static class MarkdownRenderer
         }
     }
 
-    // Returns the rewritten URL for local-file references, or null to leave the URL as-is.
-    private static string? TryRewrite(string? url)
+    // The local filesystem path a URL refers to (file:// URI, rooted Windows path, or
+    // UNC), or null when the URL is not a local-file reference.
+    private static string? ResolveLocalPath(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
         {
             return null;
         }
 
-        string? localPath = null;
-
         if (url.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
         {
-            if (Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
-            {
-                localPath = uri.LocalPath;
-            }
-        }
-        else if (LocalPathPattern.IsMatch(url))
-        {
-            localPath = url;
+            return Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ? uri.LocalPath : null;
         }
 
-        return localPath is null
-            ? null
-            : "/local-file?path=" + Uri.EscapeDataString(localPath);
+        return LocalPathPattern.IsMatch(url) ? url : null;
+    }
+
+    private static bool IsExternalHttp(string? url)
+    {
+        return url is not null
+            && (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
     }
 }
