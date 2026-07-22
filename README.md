@@ -1,10 +1,8 @@
 # ClaudeShell
 
-A **job-agnostic, generic coding shell** built around Claude that ties together multiple MCP servers to provide specialized capabilities. This is a generalized, extensible version of **ClaudeWorkbench** — stripping away job-specific logic and creating a reusable platform where you can attach MCP servers to handle domain-specific tasks.
+A **minimal Claude coding shell** — Blazor UI + Node sidecar running Claude with all native tools enabled. No governance, no indexing, no workflow. Just Claude.
 
-The core governs **how Claude proposes changes** — every edit goes through a local *Working* candidate, staging, and a human **accept/reject** gate before touching real source. The engine that enforces this — indexing, edit sessions, staging, review gates, and an MCP tool surface — is extracted from **AIMonitor** and runs UI-agnostic here, with **no WinForms**. The difference: **where ClaudeWorkbench was purpose-built, ClaudeShell is a blank canvas** where MCP servers plug in to define *what* the shell does.
-
-> Status: **working end-to-end.** Engine extracted + green; Blazor host + Claude sidecar live; the full governed loop (stage → in-app **DiffPlex** review/merge → operator accept writes source → post-accept build + reindex), **session continuity** (resume + New Thread), the agent's **AskUserQuestion → operator questions dialog**, **file upload**, **context/usage meters**, a **model + reasoning-level selector**, a **Tasks kanban board** with an agent **task-memory** MCP loop (`get_current_task` / `update_agent_notes`), and **single-start** (the host launches + supervises the sidecar) with an injected **governed role card** are all built and operator-verified on the subscription. **New:** MCP server integration pattern for job-agnostic extensibility. See [Roadmap](#roadmap).
+**This is a blank canvas.** Forks add domain-specific logic via MCP servers and Agent SDK patterns.
 
 ---
 
@@ -19,13 +17,14 @@ guided reading path and a system diagram. Highlights:
 
 ## Why this exists
 
-ClaudeShell extracts the **governed AI editing engine** from ClaudeWorkbench and generalizes it: instead of baking in job-specific logic, it provides a **platform for MCP server integration**. The architecture is the same proven two-process design, but extensible:
+ClaudeShell extracts the **shell concept** from ClaudeWorkbench: a simple UI for Claude with optional MCP servers, but **no built-in governance or workflow**. 
 
-- **AIMonitor** — the governed engine (the hard part: Roslyn indexing, the two compile gates, session staging, post-accept freshness). Extracted here without its WinForms shell, MCP proxy hub, or stdio bridge.
-- **ClaudeWorkbench pattern** — the Blazor control-surface and agent-driver shape, now detached from domain-specific workflows.
-- **Claude + MCP servers** — a thin `claude-sidecar` (Agent SDK) drives Claude and registers MCP servers, replacing hard-coded job logic with pluggable capabilities.
+**This implementation currently includes AIMonitor** (indexing, staging, review gates, etc.) — that's what the host does. But it's **not a requirement**. You can:
+- Strip the host down to pure chat UI (fork and simplify)
+- Replace it entirely with your own Blazor/web app
+- Use it as-is if you want the indexing + governance
 
-**The key difference:** ClaudeWorkbench *is* the application (editor role, task board, etc. built in). ClaudeShell *hosts* the application — you connect MCP servers to define what it does. Same governance, infinite specialization.
+The key: **BasicSidecar is governance-free.** The host/governance layer is optional, replaceable, or completely removable.
 
 The move to Claude is deliberate: **real skills, hooks, and a programmatic operator gate** instead of policy prose you fight every turn.
 
@@ -44,12 +43,23 @@ choose workspace → discover (index) → refresh_file / new_file → governed e
 ## Architecture
 
 ```
-Blazor host (ClaudeWorkbench)  ── spawns ──►  claude-sidecar (Node, Claude Agent SDK)
-   │  hosts the engine + MCP surface             │  registers the MCP surface, drives Claude,
-   │  renders UI + live log                      │  streams tool/turn events back to the host
-   └── AIMonitor.* engine  (extracted; no WinForms / proxy / bridge)
-        Core · Logging(thin) · MSBuild · Data · Workflow · Runtime · Indexing · McpServer
+Blazor host (ClaudeShell)  ── spawns ──►  BasicSidecar (Node, Claude Agent SDK)
+   │  renders UI + event stream             │  drives Claude with all native tools
+   │  (no built-in governance)              │  streams tool/turn events back to the host
+   │                                        │  delegates domain logic to MCP servers
+   └── (optional) AIMonitor engine
+        ↑ only if you fork for governance
 ```
+
+**ClaudeShell is pure Claude.** No governance, no workflow, no workspace juggling. Just:
+- **Blazor host** — renders the chat UI, streams events from the sidecar
+- **BasicSidecar** — runs Claude with all native tools (no deny-by-default)
+- **launch-shell.ps1** — starts everything (host + sidecar) in one command
+
+**Forks add domain logic via:**
+- **MCP servers** (specialized capabilities)
+- **Sidecar middleware** (see `sidecar/samples/ai-monitor-workflow/` for governance patterns)
+- **Custom launcher UI** (see `samples/ai-monitor-launcher/` for a workspace manager example)
 
 Details, including exactly how the sidecar registers the MCP surface and the logging model, are in
 **[docs/architecture/Architecture.md](docs/architecture/Architecture.md)** (or the guided **[docs/](docs/)** index). Short version:
@@ -72,20 +82,24 @@ src/
   AIMonitor.Indexing/    Roslyn semantic extraction → index
   AIMonitor.McpServer/   MCP tool surface (governed discovery + mutation + review) — stdio console host
   ClaudeWorkbench.Host/  in-proc ASP.NET host: same tool surface over Streamable HTTP (:6100) + /health
-  ClaudeWorkbench.Launcher/  WinForms control panel: one process per workspace, Job Object lifetime
-scripts/                 publish-live.ps1 — Release build of host+sidecar+launcher into one folder
-                         (also runs automatically after any Release build of the solution)
+scripts/                 publish-live.ps1 — Release build of host+sidecar into one folder
+                         launch-shell.ps1 — Direct launcher (no GUI, starts immediately)
 tests/
   unit/                  xUnit per-layer tests (incl. the language corpus, Data.Tests/Corpus)
   integration/           end-to-end over the MCP surface + engine
-samples/watched-solutions/   fixtures the ClaudeSmokes/integration tests operate on
+samples/
+  watched-solutions/     Test fixtures for integration tests
+  ai-monitor-launcher/   EXAMPLE: workspace manager UI (WinForms, folder picker, config)
+                         ↑ not part of ClaudeShell; shows how to build a fork-specific UI
 docs/                    developer + user docs — start at docs/README.md
-  architecture/            C4 architecture, the governed loop, the two gates
-  components/              one page per module (C4 component level, Mermaid)
-  guide/                   user help (getting-started, merge-review, git-panel, …)
-  decisions/               ADRs (why the gate is code, two-process, argv git, …)
-sidecar/                 Node/TS Claude Agent SDK driver: canUseTool operator gate,
-                         neutral event contract, SSE stream to the host (events/gate/bus/index)
+  architecture/          C4 architecture, the governed loop, the two gates
+  components/            one page per module (C4 component level, Mermaid)
+  guide/                 user help (getting-started, merge-review, git-panel, …)
+  decisions/             ADRs (why the gate is code, two-process, argv git, …)
+sidecar/
+  basic/                 BasicSidecar (default: all tools allowed, no governance)
+  samples/
+    ai-monitor-workflow/ Example: how to add governance + staging on top of BasicSidecar
 ```
 
 Project/namespace names are kept as `AIMonitor.*` from the extraction so the port stayed mechanical and the ported tests prove fidelity. Rebranding, if ever wanted, is an isolated later pass.

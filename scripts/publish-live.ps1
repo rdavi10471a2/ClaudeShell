@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Publishes a ClaudeWorkbench "live" install: the Blazor host, the Node sidecar and the
-    Launcher, side by side in one folder, plus a shortcut to the Launcher.
+    Publishes a ClaudeShell "live" install: the Blazor host, the Node sidecar (BasicSidecar),
+    and the Launcher, side by side in one folder, plus a shortcut to the Launcher.
 
 .DESCRIPTION
-    Produces this layout, which the Launcher recognises as a workbench root:
+    Produces this layout, which the Launcher recognises as a shell root:
 
         <Destination>\
             host\      ClaudeWorkbench.Host.exe (the Blazor app) + its config\
@@ -23,7 +23,7 @@
     non-ASCII punctuation into a parse error.
 
 .PARAMETER Destination
-    Where to publish. Defaults to C:\ClaudeWorkBenchLive.
+    Where to publish. Defaults to C:\ClaudeShellLive.
 
 .PARAMETER Configuration
     Build configuration. Defaults to Release.
@@ -40,7 +40,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Destination = 'C:\ClaudeWorkBenchLive',
+    [string]$Destination = 'C:\ClaudeShellLive',
     [string]$Configuration = 'Release',
     [switch]$NoShortcut,
     [switch]$Clean
@@ -55,33 +55,31 @@ $env:CWB_SKIP_PUBLISH_LIVE = '1'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $hostProject = Join-Path $repoRoot 'src\ClaudeWorkbench.Host\ClaudeWorkbench.Host.csproj'
-$launcherProject = Join-Path $repoRoot 'src\ClaudeWorkbench.Launcher\ClaudeWorkbench.Launcher.csproj'
 $sidecarSource = Join-Path $repoRoot 'sidecar'
 
-foreach ($required in @($hostProject, $launcherProject, $sidecarSource)) {
+foreach ($required in @($hostProject, $sidecarSource)) {
     if (-not (Test-Path $required)) {
-        throw "Not a ClaudeWorkbench checkout - missing $required"
+        throw "Not a ClaudeShell checkout - missing $required"
     }
 }
 
 $hostOut = Join-Path $Destination 'host'
 $sidecarOut = Join-Path $Destination 'sidecar'
-$launcherOut = Join-Path $Destination 'launcher'
 
 # A running install holds its exes open and publish fails partway through with an unhelpful
 # MSBuild error. Say so up front instead.
-$inUse = Get-Process -Name 'ClaudeWorkbench.Launcher', 'ClaudeWorkbench.Host' -ErrorAction SilentlyContinue |
+$inUse = Get-Process -Name 'ClaudeWorkbench.Host' -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -and $_.Path.StartsWith($Destination, [StringComparison]::OrdinalIgnoreCase) }
 if ($inUse) {
     $names = ($inUse | ForEach-Object { "$($_.ProcessName) (pid $($_.Id))" }) -join ', '
     throw "Close the running install first - $names is using $Destination."
 }
 
-Write-Host "Publishing ClaudeWorkbench ($Configuration) -> $Destination" -ForegroundColor Cyan
+Write-Host "Publishing ClaudeShell ($Configuration) -> $Destination" -ForegroundColor Cyan
 
 if ($Clean) {
-    # Deliberately only the three build outputs: runtime\ holds the user's instance state.
-    foreach ($stale in @($hostOut, $sidecarOut, $launcherOut)) {
+    # Deliberately only the two build outputs: runtime\ holds the user's instance state.
+    foreach ($stale in @($hostOut, $sidecarOut)) {
         if (Test-Path $stale) {
             Write-Host "  cleaning $stale"
             Remove-Item $stale -Recurse -Force
@@ -105,37 +103,32 @@ if (Test-Path $strayConfig) {
     Write-Host '  removed build-machine config\appsettings.json (instances get their own)'
 }
 
-# --- 2. Launcher ----------------------------------------------------------------------
+# --- 2. Sidecar (BasicSidecar) -----------------------------------------------
 Write-Host ''
-Write-Host '[2/4] Publishing launcher...' -ForegroundColor Cyan
-dotnet publish $launcherProject -c $Configuration -o $launcherOut --nologo
-if ($LASTEXITCODE -ne 0) { throw "Launcher publish failed ($LASTEXITCODE)." }
-
-# --- 3. Sidecar -----------------------------------------------------------------------
-Write-Host ''
-Write-Host '[3/4] Building sidecar...' -ForegroundColor Cyan
+Write-Host '[2/3] Building BasicSidecar...' -ForegroundColor Cyan
 $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
 if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
 if (-not $npm) { throw 'npm was not found on PATH - needed to build the sidecar.' }
 
-Push-Location $sidecarSource
+$basicSidecar = Join-Path $sidecarSource 'basic'
+Push-Location $basicSidecar
 try {
-    if (-not (Test-Path (Join-Path $sidecarSource 'node_modules'))) {
+    if (-not (Test-Path (Join-Path $basicSidecar 'node_modules'))) {
         & $npm.Source install
         if ($LASTEXITCODE -ne 0) { throw "npm install failed ($LASTEXITCODE)." }
     }
 
     & $npm.Source run build
-    if ($LASTEXITCODE -ne 0) { throw "Sidecar build failed ($LASTEXITCODE)." }
+    if ($LASTEXITCODE -ne 0) { throw "BasicSidecar build failed ($LASTEXITCODE)." }
 }
 finally {
     Pop-Location
 }
 
 New-Item -ItemType Directory -Force -Path $sidecarOut | Out-Null
-Copy-Item (Join-Path $sidecarSource 'dist') $sidecarOut -Recurse -Force
-Copy-Item (Join-Path $sidecarSource 'package.json') $sidecarOut -Force
-$lockFile = Join-Path $sidecarSource 'package-lock.json'
+Copy-Item (Join-Path $basicSidecar 'dist') $sidecarOut -Recurse -Force
+Copy-Item (Join-Path $basicSidecar 'package.json') $sidecarOut -Force
+$lockFile = Join-Path $basicSidecar 'package-lock.json'
 if (Test-Path $lockFile) { Copy-Item $lockFile $sidecarOut -Force }
 
 # Runtime dependencies only (the Agent SDK + express). Falls back to copying the checkout's
@@ -143,7 +136,11 @@ if (Test-Path $lockFile) { Copy-Item $lockFile $sidecarOut -Force }
 Write-Host '  installing production dependencies...'
 Push-Location $sidecarOut
 try {
-    if (Test-Path $lockFile) { & $npm.Source ci --omit=dev } else { & $npm.Source install --omit=dev }
+    if (Test-Path (Join-Path $sidecarOut 'package-lock.json')) { 
+        & $npm.Source ci --omit=dev 
+    } else { 
+        & $npm.Source install --omit=dev 
+    }
 }
 finally {
     Pop-Location
@@ -151,56 +148,39 @@ finally {
 
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $sidecarOut 'node_modules'))) {
     Write-Warning 'npm install failed (offline?) - copying the checkout node_modules instead.'
-    Copy-Item (Join-Path $sidecarSource 'node_modules') $sidecarOut -Recurse -Force
+    $checkoutNodeModules = Join-Path $basicSidecar 'node_modules'
+    if (Test-Path $checkoutNodeModules) {
+        Copy-Item $checkoutNodeModules $sidecarOut -Recurse -Force
+    }
 }
 
 if (-not (Test-Path (Join-Path $sidecarOut 'dist\index.js'))) {
-    throw "Sidecar publish incomplete: $sidecarOut\dist\index.js is missing."
+    throw "BasicSidecar publish incomplete: $sidecarOut\dist\index.js is missing."
 }
 
-# --- 3b. Sample workspace -------------------------------------------------------------
-# A small watched solution so a fresh install has something to open on first run. It goes in
-# samples\, NOT runtime\ - runtime\ is disposable per-workspace state and gets cleared.
-$sampleSource = Join-Path $repoRoot 'samples\watched-solutions\CalculatorSample'
-$sampleOut = Join-Path $Destination 'samples\CalculatorSample'
-if (Test-Path $sampleSource) {
-    Write-Host '  copying CalculatorSample workspace...'
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $sampleOut) | Out-Null
-    if (Test-Path $sampleOut) { Remove-Item $sampleOut -Recurse -Force }
-    Copy-Item $sampleSource $sampleOut -Recurse -Force
-    # Never ship the sample's own build output.
-    Get-ChildItem $sampleOut -Directory -Recurse -Include 'bin', 'obj' -ErrorAction SilentlyContinue |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+# Copy launch scripts
+Write-Host '  copying launch scripts...'
+$scriptsOut = Join-Path $Destination 'scripts'
+New-Item -ItemType Directory -Force -Path $scriptsOut | Out-Null
+Copy-Item (Join-Path $repoRoot 'scripts\launch-shell.ps1') $scriptsOut -Force
+Copy-Item (Join-Path $repoRoot 'scripts\create-shortcuts.ps1') $scriptsOut -Force
 
-    # Golden backup: a pristine, NEVER-watched mirror of the sample, in a sibling
-    # samples-golden\ root. The watched copy under samples\ gets edited by test runs (and
-    # clobbered on the next publish), so resetting the fixture needs an untouched source to
-    # copy back from. The Launcher's "Reset Sample" button copies samples-golden\ over
-    # samples\ to restore the fixture to first-publish state.
-    $goldenOut = Join-Path $Destination 'samples-golden\CalculatorSample'
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $goldenOut) | Out-Null
-    if (Test-Path $goldenOut) { Remove-Item $goldenOut -Recurse -Force }
-    Copy-Item $sampleSource $goldenOut -Recurse -Force
-    Get-ChildItem $goldenOut -Directory -Recurse -Include 'bin', 'obj' -ErrorAction SilentlyContinue |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-# --- 4. Shortcuts ---------------------------------------------------------------------
+# --- 3. Shortcuts -----------------------------------------------------------------------
 Write-Host ''
-Write-Host '[4/4] Creating shortcut...' -ForegroundColor Cyan
-$launcherExe = Join-Path $launcherOut 'ClaudeWorkbench.Launcher.exe'
-if (-not (Test-Path $launcherExe)) { throw "Launcher exe not found at $launcherExe" }
+Write-Host '[3/3] Creating shortcuts...' -ForegroundColor Cyan
+$launchScript = Join-Path $scriptsOut 'launch-shell.ps1'
+$pwshExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source
+if (-not $pwshExe) { $pwshExe = 'powershell.exe' }
 
-function New-LauncherShortcut {
-    param([string]$LinkPath, [string]$TargetExe, [string]$WorkingDir)
-
+function New-DirectLaunchShortcut {
+    param([string]$LinkPath)
     $shell = New-Object -ComObject WScript.Shell
     try {
         $shortcut = $shell.CreateShortcut($LinkPath)
-        $shortcut.TargetPath = $TargetExe
-        $shortcut.WorkingDirectory = $WorkingDir
-        $shortcut.IconLocation = $TargetExe
-        $shortcut.Description = 'ClaudeWorkbench Launcher'
+        $shortcut.TargetPath = $pwshExe
+        $shortcut.Arguments = "-NoExit -ExecutionPolicy Bypass -File `"$launchScript`""
+        $shortcut.WorkingDirectory = $Destination
+        $shortcut.Description = 'ClaudeShell — starts immediately with temp workspace'
         $shortcut.Save()
         Write-Host "  $LinkPath"
     }
@@ -209,20 +189,27 @@ function New-LauncherShortcut {
     }
 }
 
-New-LauncherShortcut -LinkPath (Join-Path $Destination 'ClaudeWorkbench Launcher.lnk') -TargetExe $launcherExe -WorkingDir $launcherOut
+New-DirectLaunchShortcut -LinkPath (Join-Path $Destination 'ClaudeShell.lnk')
 if (-not $NoShortcut) {
-    $desktopLink = Join-Path ([Environment]::GetFolderPath('Desktop')) 'ClaudeWorkbench Launcher.lnk'
-    New-LauncherShortcut -LinkPath $desktopLink -TargetExe $launcherExe -WorkingDir $launcherOut
+    $desktopLink = Join-Path ([Environment]::GetFolderPath('Desktop')) 'ClaudeShell.lnk'
+    New-DirectLaunchShortcut -LinkPath $desktopLink
 }
 
 Write-Host ''
-Write-Host "Done. Install root: $Destination" -ForegroundColor Green
+Write-Host "Done. ClaudeShell install root: $Destination" -ForegroundColor Green
 Write-Host "  host      $hostOut"
-Write-Host "  sidecar   $sidecarOut"
-Write-Host "  launcher  $launcherOut"
+Write-Host "  sidecar   $sidecarOut  (BasicSidecar - no governance)"
+Write-Host "  scripts   $scriptsOut   (launch-shell.ps1)"
 Write-Host "  runtime   $(Join-Path $Destination 'runtime')  (per-workspace state, created on first Start)"
 Write-Host ''
-Write-Host 'This publish is framework-dependent. A target machine also needs:' -ForegroundColor Yellow
-Write-Host '  - .NET 10 SDK       (the runtime to start; MSBuild/Roslyn from the SDK to index)'
-Write-Host '  - Node.js on PATH   (the claude CLI itself ships inside the sidecar)'
-Write-Host '  - a Claude login in ~\.claude'
+Write-Host 'Quick start:' -ForegroundColor Yellow
+Write-Host '  → Click "ClaudeShell.lnk" to start (uses temp workspace by default)'
+Write-Host '  → Or: powershell -NoExit -ExecutionPolicy Bypass -File "$launchScript" -Workspace C:\MyProject'
+Write-Host ''
+Write-Host 'To build a workspace manager (like the old Launcher):' -ForegroundColor Cyan
+Write-Host '  See samples/ai-monitor-launcher/ for a complete example'
+Write-Host ''
+Write-Host 'Target machine requirements:' -ForegroundColor Yellow
+Write-Host '  - .NET 10 SDK       (for the host and indexing via MSBuild/Roslyn)'
+Write-Host '  - Node.js on PATH   (the claude CLI ships inside the sidecar)'
+Write-Host '  - a Claude login in ~\.claude  (or ANTHROPIC_API_KEY for billing)'
