@@ -2,8 +2,11 @@
 
 A **minimal desktop shell for Claude**: a Blazor web UI plus a small Node sidecar that
 drives Claude through the **Claude Agent SDK**. No system prompt, no governance, no
-integrations — plain Claude with all of its native tools, where **every tool call
-pauses for your Allow/Deny** before it runs.
+integrations — plain Claude with all of its native tools, where **anything that writes,
+runs a command, or reaches the network pauses for your Allow/Deny** before it runs.
+Read-only inspection (`Read`/`Grep`/`Glob`) is allowed without a prompt, matching the
+real Claude Code client; [that line is one edit away](#make-it-yours) if you want it
+stricter or looser.
 
 Use it as-is for a local Claude console, or fork it as the starting shell for your own
 workflow: the sidecar is the single place where prompt, tools, and permissions are
@@ -18,7 +21,7 @@ resume behind an HTTP API — that is exactly what this repo implements
 ```
 Blazor host (:5000)  ── spawns ──►  BasicSidecar (:6110, Node + Claude Agent SDK)
    chat UI, permission dialog,        drives Claude (empty prompt, all tools)
-   questions dialog, usage meters     gates every tool call on the operator
+   questions dialog, usage meters     gates writes/commands/egress on the operator
    IOperatorConsole seam              streams events back over SSE
 ```
 
@@ -26,8 +29,17 @@ Blazor host (:5000)  ── spawns ──►  BasicSidecar (:6110, Node + Claude
 
 - **Assistant tab** — transcript with markdown, composer with file attachments,
   per-message copy, pop-out chat history, activity log modal.
-- **Permission gate** — each tool call (edit a file, run a command, fetch a page)
-  pops an Allow/Deny dialog. Nothing runs silently.
+- **Permission gate** — writes, commands (`Bash`/`PowerShell`), and network calls pop
+  an Allow/Deny dialog with the actual command/URL/skill shown. Read-only tools
+  (`Read`/`Grep`/`Glob`, plus `TodoWrite`/`ToolSearch`) run without a prompt; change
+  the `AUTO_ALLOWED` set in `sidecar/basic/index.ts` to gate everything (or less).
+- **Inline images** *(moderately tested)* — when the agent writes a file and references
+  it as `![](path)` — or just `Read`s a local image — it renders inline in chat, served
+  through a workspace-scoped `/local-file` endpoint. The endpoint's security (only files
+  under the workspace or ones the agent read/wrote this thread) is unit-verified; the
+  rendering works in normal use but hasn't been hammered. Known gaps: base64 image blocks
+  straight off the tool stream aren't rendered, and git-bash `/tmp/...` paths that Windows
+  can't resolve fall back to a plain tool line.
 - **Questions dialog** — when Claude asks a clarifying question
   (`AskUserQuestion`), you answer in a card UI with an always-available free-text.
 - **Usage meters** — live context fill, weekly/5-hour subscription utilization,
@@ -112,7 +124,10 @@ engine this shell was factored out of and left with it. The sidecar has
 `sidecar/basic/index.ts` is the whole policy surface:
 
 - `systemPrompt` — put your role card here (empty on purpose).
-- `canUseTool` — decide what gets gated, auto-allowed, or denied.
+- `AUTO_ALLOWED` — the set of tools that skip the gate. It ships with the read-only
+  and bookkeeping tools (`Read`/`Grep`/`Glob`/`TodoWrite`/`ToolSearch`); empty it to
+  gate literally everything, or add tools (e.g. `Write`) to prompt less.
+- `canUseTool` — the gate itself: decide what pauses, auto-allows, or is denied.
 - SDK options — register MCP servers, change `settingSources`, restrict tools.
 
 The host UI binds only to `IOperatorConsole`/`IApprovalQueue`

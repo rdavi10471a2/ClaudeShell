@@ -9,10 +9,11 @@ the **Claude Agent SDK** and streams events back to the Blazor host over SSE.
   option would fall back to the CLI's built-in Claude-Code prompt; an explicit string
   replaces it.) `settingSources: []` — no CLAUDE.md, no `~/.claude` settings leak.
 - **All native tools available** — `disallowedTools: []`, no MCP servers, no deny lists.
-- **Every tool call asks the operator.** `canUseTool` pauses each call at an
-  Allow/Deny gate (`gate_request` → operator decision → `gate_resolved`). Only
-  `TodoWrite`/`ToolSearch` (agent bookkeeping) and `AskUserQuestion` (routed to the
-  questions dialog instead) skip the gate.
+- **Writes, commands, and egress ask the operator.** `canUseTool` pauses those at an
+  Allow/Deny gate (`gate_request` → operator decision → `gate_resolved`). The
+  read-only/bookkeeping tools in `AUTO_ALLOWED` (`Read`/`Grep`/`Glob`/`TodoWrite`/
+  `ToolSearch`) and `AskUserQuestion` (routed to the questions dialog) skip the gate —
+  matching the real Claude Code client. Edit `AUTO_ALLOWED` to make it stricter/looser.
 - **Session continuity** — streaming-input query, `resume` across restarts,
   interrupt, live context/subscription usage off the Query handle.
 
