@@ -617,10 +617,16 @@
     overflow-wrap: anywhere;
 }
 
-.message-body ::deep img {
+.message-body ::deep img,
+.chat-inline-image {
     max-width: 100%;
     height: auto;
     border-radius: 6px;
+}
+
+.chat-inline-image {
+    display: block;
+    cursor: zoom-in;
 }
 
 .message-body ::deep p:first-child {

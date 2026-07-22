@@ -203,6 +203,16 @@
                                     }
                                 </div>
                             }
+                            else if (entry.Kind == TranscriptKind.Image)
+                            {
+                                <div class="message assistant">
+                                    <div class="message-body">
+                                        <a href="@LocalFileUrl(entry.Text)" target="_blank" rel="noopener" title="@entry.Text">
+                                            <img class="chat-inline-image" src="@LocalFileUrl(entry.Text)" alt="@System.IO.Path.GetFileName(entry.Text)" />
+                                        </a>
+                                    </div>
+                                </div>
+                            }
                             else
                             {
                                 <div class="message assistant">
