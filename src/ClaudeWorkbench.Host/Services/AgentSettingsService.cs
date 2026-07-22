@@ -14,9 +14,8 @@ public sealed class AgentSettingsService
 
     public AgentSettingsService(WorkspaceManager workspace)
     {
-        // Monitor-general setting (not per-watched-solution), so it lives with the
-        // monitor's own config next to appsettings.json — keyed off the stable
-        // monitor repo root, not any per-solution runtime path.
+        // Lives in the workspace base folder so each workspace keeps its own
+        // model/effort choice.
         path = Path.Combine(workspace.BasePath, "agent-settings.json");
         policy = Load();
     }

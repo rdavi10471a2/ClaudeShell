@@ -6,7 +6,7 @@
 // The trailing pane must stay `flex: 1 1 auto; min-width: 0` so it consumes exactly what is left.
 // The moment you also pin the trailing pane to a pixel width, the two panes stop being related to
 // the container: drag the divider right, or shrink the window, and leading + trailing exceed the
-// layout width. The overflow goes off the right edge — and because the layout is `overflow: hidden`,
+// layout width. The overflow goes off the right edge â€” and because the layout is `overflow: hidden`,
 // it is silently clipped rather than scrolled. That took the transcript's vertical scrollbar
 // off-screen with it, which is why "the chat lost its scrollbar" and "the right side runs off the
 // screen" were one bug, not two.
@@ -16,7 +16,7 @@
 // which means the divider stops before it can push the trailing pane out, instead of being free to
 // run past the edge.
 //
-// The same clamp is re-applied when the layout resizes (ResizeObserver, not a window listener —
+// The same clamp is re-applied when the layout resizes (ResizeObserver, not a window listener â€”
 // it is owned by the element, so it dies with the element instead of accumulating one dead global
 // handler per tab switch). Shrinking the window therefore pulls the divider back in rather than
 // shoving the trailing pane off-screen.
@@ -96,94 +96,9 @@ function attachColumnSplitter(layout, leading, trailing, splitter, minLeading, m
     }
 }
 
-// Source tab: file tree on the left, file detail on the right.
-export function attachSourceSplitter(layout, sidebar, detail, splitter) {
-    attachColumnSplitter(layout, sidebar, detail, splitter, 260, 460);
-}
-
-// Git tab: changed-files list on the left, diff on the right.
-export function attachGitSplitter(layout, sidebar, detail, splitter) {
-    attachColumnSplitter(layout, sidebar, detail, splitter, 280, 380);
-}
-
-// Workbench tab: composer on the left, chat history on the right.
-//
-// This previously called attachSourceSplitter directly. Borrowing another tab's splitter is what
-// dragged the Source tab's "pin both panes" behaviour into the chat layout; the minimums were also
-// the Source tab's, so the chat history reserved 460px it did not need. It gets its own entry point
-// with its own minimums now, even though the mechanism is shared.
+// Assistant tab: composer on the left, chat history on the right.
 export function attachAssistantSplitter(layout, composer, transcript, splitter) {
     attachColumnSplitter(layout, composer, transcript, splitter, 320, 360);
-}
-
-// DiffView: two fixed 50/50 panes that share ONE horizontal scrollbar. The body owns the shared
-// VERTICAL bar natively (both panes scroll vertically together). Horizontal is a single dedicated
-// bar (hbar) whose track (hbarInner) is widened to the longest line, so one bottom bar spans the
-// wider pane's range and drives BOTH panes' scrollLeft together. Element-keyed so re-renders do not
-// stack handlers; a ResizeObserver re-measures when content changes.
-export function attachDiffHScroll(leftPane, rightPane, hbar, hbarInner) {
-    if (!leftPane || !rightPane || !hbar || !hbarInner) {
-        return;
-    }
-
-    // Blazor re-creates the panes on re-render/resize. A one-time listener that closed over the
-    // FIRST refs would then drive stale, detached elements -- the bar goes dead and "does not come
-    // back". So stash the CURRENT elements on the bar and read them dynamically every time.
-    hbar.__diffLeft = leftPane;
-    hbar.__diffRight = rightPane;
-    hbar.__diffInner = hbarInner;
-
-    function measure() {
-        const l = hbar.__diffLeft;
-        const r = hbar.__diffRight;
-        const inner = hbar.__diffInner;
-        if (!l || !r || !inner) {
-            return;
-        }
-        // The bar spans the FULL width (both panes), but each pane is only ~half that wide. So we
-        // cannot size the track to the raw scrollWidth and map bar-pixels onto the pane 1:1 -- the
-        // bar's range would come out far shorter than the pane's, and dragging it to the end would
-        // leave a long line only part-scrolled (the "shrink the window, math is wrong" case).
-        //
-        // Correct rule: the bar's OWN scroll range must equal the pane's overflow. So
-        //     track = visible width + how far the content overflows a pane
-        // Then bar.scrollLeft (0..overflow) drives pane.scrollLeft (0..overflow) exactly, and the
-        // bar only appears at all when a pane actually overflows (overflow > 0).
-        const overflow = Math.max(
-            l.scrollWidth - l.clientWidth,
-            r.scrollWidth - r.clientWidth,
-            0
-        );
-        inner.style.width = (hbar.clientWidth + overflow) + "px";
-    }
-
-    if (hbar.dataset.diffHAttached !== "true") {
-        hbar.dataset.diffHAttached = "true";
-
-        hbar.addEventListener("scroll", () => {
-            const l = hbar.__diffLeft;
-            const r = hbar.__diffRight;
-            if (l) { l.scrollLeft = hbar.scrollLeft; }
-            if (r) { r.scrollLeft = hbar.scrollLeft; }
-        });
-
-        window.addEventListener("resize", () => window.requestAnimationFrame(measure));
-    }
-
-    // Re-observe the CURRENT panes; a prior observer may be watching detached ones.
-    if (typeof ResizeObserver === "function") {
-        if (hbar.__diffHObserver) {
-            hbar.__diffHObserver.disconnect();
-        }
-        const observer = new ResizeObserver(() => measure());
-        observer.observe(leftPane);
-        observer.observe(rightPane);
-        hbar.__diffHObserver = observer;
-    }
-
-    // Measure now and again after layout settles (first paint can report a stale scrollWidth).
-    measure();
-    window.requestAnimationFrame(measure);
 }
 
 export function attachComposerAutoScroll(textarea) {

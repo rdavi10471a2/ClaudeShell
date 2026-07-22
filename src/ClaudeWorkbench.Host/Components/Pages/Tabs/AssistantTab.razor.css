@@ -234,7 +234,7 @@
     flex: 1 1 auto;
 }
 
-/* top utility bar: attach, activity, auto-approve (uses the roomy top strip) */
+/* top utility bar: attach + activity (uses the roomy top strip) */
 .chat-composer-toolbar {
     display: flex;
     align-items: center;

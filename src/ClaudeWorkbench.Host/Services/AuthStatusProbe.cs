@@ -5,14 +5,13 @@ using Microsoft.Extensions.Hosting;
 
 namespace ClaudeWorkbench.Host.Services;
 
-// Polls the two auth sources on an interval and caches the result so the command-bar
-// dots can render every frame without shelling a CLI. Each source lives where it
-// belongs — Claude behind the sidecar's /auth (it owns the Claude CLI), GitHub in
-// GitService (it owns `gh`) — and this service is only the aggregator + poller.
+// Polls Claude auth on an interval and caches the result so the command-bar dot can
+// render every frame without shelling a CLI. The probe lives behind the sidecar's
+// /auth endpoint (the sidecar owns the Claude CLI relationship).
 //
-// Values are tri-state (null = unknown): a failed sidecar fetch or a missing CLI
-// leaves that flag null rather than flipping it to a false "signed out", so the dot
-// degrades to a neutral "checking" state instead of lying.
+// Tri-state (null = unknown): a failed sidecar fetch or a missing CLI leaves the flag
+// null rather than flipping it to a false "signed out", so the dot degrades to a
+// neutral "checking" state instead of lying.
 public sealed class AuthStatusProbe : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
