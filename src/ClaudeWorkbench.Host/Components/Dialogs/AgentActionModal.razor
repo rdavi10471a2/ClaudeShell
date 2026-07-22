@@ -46,7 +46,13 @@
                 <RadzenButton Text="Allow"
                               ButtonStyle="ButtonStyle.Success"
                               Size="ButtonSize.Small"
+                              Title="Allow this one call"
                               Click="@(() => ResolveApprovalAsync(true))" />
+                <RadzenButton Text="@($"Allow {approval.Tool} — don't ask again")"
+                              ButtonStyle="ButtonStyle.Info"
+                              Size="ButtonSize.Small"
+                              Title="@($"Stop prompting for {approval.Tool} for the rest of this thread (reset on New Thread)")"
+                              Click="@(() => ResolveApprovalAsync(true, remember: true))" />
                 <RadzenButton Text="Deny"
                               ButtonStyle="ButtonStyle.Light"
                               Size="ButtonSize.Small"

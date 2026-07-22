@@ -112,7 +112,7 @@ public partial class AgentActionModal : IDisposable
         selections.Remove(question);
     }
 
-    private async Task ResolveApprovalAsync(bool approve)
+    private async Task ResolveApprovalAsync(bool approve, bool remember = false)
     {
         ApprovalRequest? approval = CurrentApproval;
         if (approval is null)
@@ -120,7 +120,7 @@ public partial class AgentActionModal : IDisposable
             return;
         }
 
-        await Approvals.ResolveApprovalAsync(approval.Id, approve);
+        await Approvals.ResolveApprovalAsync(approval.Id, approve, reason: null, remember: remember);
     }
 
     private async Task SubmitElicitationAsync()

@@ -39,6 +39,9 @@ const AUTO_ALLOWED = new Set<string>([
   "Glob",
 ]);
 
+// Tools the operator chose "don't ask again this thread" for. Cleared on New Thread.
+const sessionAllowed = new Set<string>();
+
 // --- minimal content-block shapes we read off SDK messages --------------
 interface TextBlock {
   type: "text";
@@ -174,13 +177,14 @@ const canUseTool: CanUseTool = async (toolName, input, { signal }) => {
     return { behavior: "allow", updatedInput: { ...(input as object), questions, answers } };
   }
 
-  // Agent bookkeeping tools proceed silently.
-  if (AUTO_ALLOWED.has(baseName(toolName))) {
+  const tool = baseName(toolName);
+
+  // Auto-allowed by default, or by the operator's "don't ask again this thread".
+  if (AUTO_ALLOWED.has(tool) || sessionAllowed.has(tool)) {
     return { behavior: "allow", updatedInput: input };
   }
 
   // Everything else pauses at the operator's Allow/Deny gate.
-  const tool = baseName(toolName);
   const { gateId, decided } = gate.request(tool, input, filePathOf(input));
   bus.emit({
     type: "gate_request",
@@ -195,6 +199,11 @@ const canUseTool: CanUseTool = async (toolName, input, { signal }) => {
   signal.addEventListener("abort", onAbort, { once: true });
   const resolution = await decided;
   signal.removeEventListener("abort", onAbort);
+
+  // "Allow, don't ask again this thread" — stop gating this tool until New Thread.
+  if (resolution.decision === "allow" && resolution.remember) {
+    sessionAllowed.add(tool);
+  }
 
   bus.emit({
     type: "gate_resolved",
@@ -506,7 +515,7 @@ app.post("/gates/:id", (req, res) => {
     res.status(400).json({ error: "decision must be 'allow' or 'deny'." });
     return;
   }
-  const ok = gate.resolve(req.params.id, decision, req.body?.reason);
+  const ok = gate.resolve(req.params.id, decision, req.body?.reason, req.body?.remember === true);
   res.status(ok ? 200 : 404).json({ resolved: ok });
 });
 
@@ -540,6 +549,7 @@ app.post("/new-thread", (_req, res) => {
   activeInput = null;
   currentSessionId = null;
   elicitations.clear();
+  sessionAllowed.clear();
   bus.clear();
   bus.emit({ type: "thread_reset", turnId: "thread" });
   res.json({ ok: true });

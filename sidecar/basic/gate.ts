@@ -10,6 +10,8 @@ export function baseName(toolName: string): string {
 export interface GateResolution {
   decision: GateDecision;
   reason?: string;
+  // On allow: also stop gating this tool for the rest of the thread.
+  remember?: boolean;
 }
 
 interface PendingGate extends GateResolution {
@@ -39,13 +41,13 @@ export class OperatorGate {
     return { gateId, decided };
   }
 
-  resolve(gateId: string, decision: GateDecision, reason?: string): boolean {
+  resolve(gateId: string, decision: GateDecision, reason?: string, remember?: boolean): boolean {
     const gate = this.pending.get(gateId);
     if (!gate) {
       return false;
     }
     this.pending.delete(gateId);
-    gate.resolve({ decision, reason });
+    gate.resolve({ decision, reason, remember });
     return true;
   }
 
