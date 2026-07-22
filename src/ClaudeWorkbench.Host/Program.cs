@@ -17,6 +17,10 @@ builder.Services.AddHttpClient();
 // The agent's working folder (base under %TEMP%\ClaudeShell + a files/ subfolder).
 builder.Services.AddSingleton<WorkspaceManager>();
 
+// Files the agent has read/written this thread, so /local-file can serve them back
+// to chat even when they live outside the workspace.
+builder.Services.AddSingleton<AgentFileAccess>();
+
 // Launch options first, so the sidecar port drives every URL below (a second
 // instance shifts Sidecar:Port + ASPNETCORE_URLS + WORKSPACE and stays isolated).
 var sidecarOptions = new SidecarLaunchOptions();

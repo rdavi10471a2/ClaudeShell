@@ -15,7 +15,7 @@ public static class LocalFileEndpoints
 
     public static void MapLocalFiles(this WebApplication app)
     {
-        app.MapGet("/local-file", (string path, WorkspaceManager workspace, IConfiguration config) =>
+        app.MapGet("/local-file", (string path, WorkspaceManager workspace, AgentFileAccess fileAccess, IConfiguration config) =>
         {
             if (string.IsNullOrWhiteSpace(path))
             {
@@ -32,7 +32,9 @@ public static class LocalFileEndpoints
                 return Results.BadRequest();
             }
 
-            if (!IsUnderAllowedRoot(full, workspace, config))
+            // Serve a file only if it is under the workspace OR the agent read/wrote it
+            // this thread (each such path was surfaced to — and gated by — the operator).
+            if (!IsUnderAllowedRoot(full, workspace, config) && !fileAccess.Contains(full))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
