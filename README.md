@@ -1,10 +1,10 @@
-# ClaudeWorkbench
+# ClaudeShell
 
-A Blazor operator console for **governed, watched-source AI edits**, driven by **Claude** through the Claude Agent SDK.
+A **job-agnostic, generic coding shell** built around Claude that ties together multiple MCP servers to provide specialized capabilities. This is a generalized, extensible version of **ClaudeWorkbench** — stripping away job-specific logic and creating a reusable platform where you can attach MCP servers to handle domain-specific tasks.
 
-The agent proposes changes to a watched solution; every change is composed against a local *Working* candidate, staged, and held at a human **accept/reject** gate before it ever touches real source. The engine that enforces this — indexing, edit sessions, staging, review gates, and an MCP tool surface — is extracted from **AIMonitor** and runs UI-agnostic here, with **no WinForms**.
+The core governs **how Claude proposes changes** — every edit goes through a local *Working* candidate, staging, and a human **accept/reject** gate before touching real source. The engine that enforces this — indexing, edit sessions, staging, review gates, and an MCP tool surface — is extracted from **AIMonitor** and runs UI-agnostic here, with **no WinForms**. The difference: **where ClaudeWorkbench was purpose-built, ClaudeShell is a blank canvas** where MCP servers plug in to define *what* the shell does.
 
-> Status: **working end-to-end.** Engine extracted + green; Blazor host + Claude sidecar live; the full governed loop (stage → in-app **DiffPlex** review/merge → operator accept writes source → post-accept build + reindex), **session continuity** (resume + New Thread), the agent's **AskUserQuestion → operator questions dialog**, **file upload**, **context/usage meters**, a **model + reasoning-level selector**, a **Tasks kanban board** with an agent **task-memory** MCP loop (`get_current_task` / `update_agent_notes`), and **single-start** (the host launches + supervises the sidecar) with an injected **governed role card** are all built and operator-verified on the subscription. See [Roadmap](#roadmap).
+> Status: **working end-to-end.** Engine extracted + green; Blazor host + Claude sidecar live; the full governed loop (stage → in-app **DiffPlex** review/merge → operator accept writes source → post-accept build + reindex), **session continuity** (resume + New Thread), the agent's **AskUserQuestion → operator questions dialog**, **file upload**, **context/usage meters**, a **model + reasoning-level selector**, a **Tasks kanban board** with an agent **task-memory** MCP loop (`get_current_task` / `update_agent_notes`), and **single-start** (the host launches + supervises the sidecar) with an injected **governed role card** are all built and operator-verified on the subscription. **New:** MCP server integration pattern for job-agnostic extensibility. See [Roadmap](#roadmap).
 
 ---
 
@@ -19,11 +19,13 @@ guided reading path and a system diagram. Highlights:
 
 ## Why this exists
 
-Two proven pieces, recombined, with the backend swapped to Claude:
+ClaudeShell extracts the **governed AI editing engine** from ClaudeWorkbench and generalizes it: instead of baking in job-specific logic, it provides a **platform for MCP server integration**. The architecture is the same proven two-process design, but extensible:
 
 - **AIMonitor** — the governed engine (the hard part: Roslyn indexing, the two compile gates, session staging, post-accept freshness). Extracted here without its WinForms shell, MCP proxy hub, or stdio bridge.
-- **CodexAppServerDemo** — the Blazor control-surface pattern and the agent-driver shape. Codex is being replaced by Claude.
-- **New** — a thin `claude-sidecar` (Agent SDK) that drives Claude and registers the MCP surface, replacing the Codex JSON-RPC client; and sidecar-event logging replacing the old man-in-the-middle MCP proxy.
+- **ClaudeWorkbench pattern** — the Blazor control-surface and agent-driver shape, now detached from domain-specific workflows.
+- **Claude + MCP servers** — a thin `claude-sidecar` (Agent SDK) drives Claude and registers MCP servers, replacing hard-coded job logic with pluggable capabilities.
+
+**The key difference:** ClaudeWorkbench *is* the application (editor role, task board, etc. built in). ClaudeShell *hosts* the application — you connect MCP servers to define what it does. Same governance, infinite specialization.
 
 The move to Claude is deliberate: **real skills, hooks, and a programmatic operator gate** instead of policy prose you fight every turn.
 
