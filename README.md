@@ -9,6 +9,12 @@ Use it as-is for a local Claude console, or fork it as the starting shell for yo
 workflow: the sidecar is the single place where prompt, tools, and permissions are
 decided.
 
+If you're looking for a working example of **browser-based tool approval with the
+Agent SDK** — a `canUseTool` hook that forwards each approval request to the browser
+over SSE and blocks until the user answers, plus streaming responses and session
+resume behind an HTTP API — that is exactly what this repo implements
+(single-operator, local; see [`sidecar/basic/index.ts`](sidecar/basic/index.ts)).
+
 ```
 Blazor host (:5000)  ── spawns ──►  BasicSidecar (:6110, Node + Claude Agent SDK)
    chat UI, permission dialog,        drives Claude (empty prompt, all tools)
