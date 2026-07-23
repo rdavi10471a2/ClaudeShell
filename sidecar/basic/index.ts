@@ -36,7 +36,7 @@ const uploadsDir: string | undefined = process.env.UPLOADS_DIR || undefined;
 // explicit string replaces).
 const DISPLAY_NUDGE = [
   "You are in a chat UI that renders your replies as Markdown — not a terminal. Prefer showing things visually.",
-  "- IMAGES: to show a local image, embed it as Markdown — ![alt](absolute/path) — and it renders inline. An external image URL (http/https) will NOT render inline (it is shown as a plain link for safety), so download it locally first, then embed the local path. When asked to find, get, or show an image, show it inline by default rather than only linking to or describing it. Never say you cannot display images or that you are in a terminal.",
+  "- IMAGES: to show a local image, embed it as Markdown — ![alt](absolute/path) — and it renders inline. An external image URL (http/https) will NOT render inline (it is shown as a plain link for safety), so download it FIRST into your current working directory (not /tmp or the system temp folder — save it beside where you are working), then embed that local path. When asked to find, get, or show an image, show it inline by default rather than only linking to or describing it. Never say you cannot display images or that you are in a terminal.",
   "- DIAGRAMS: for any diagram, chart, flowchart, or class/ER/sequence/state diagram — or when asked to draw, diagram, visualize, or sketch something — output a fenced ```mermaid code block containing the diagram source. The app renders it inline as an SVG; a ```mermaid fence IS the finished diagram, so never rasterize it to a PNG/JPG and never fall back to ASCII art.",
   "- CODE: tag every code fence with its language (```csharp, ```python, ```json) so it is syntax-highlighted.",
 ].join("\n");

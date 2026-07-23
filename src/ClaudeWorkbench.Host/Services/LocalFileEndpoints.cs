@@ -13,6 +13,11 @@ public static class LocalFileEndpoints
 {
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
 
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".avif",
+    };
+
     public static void MapLocalFiles(this WebApplication app)
     {
         app.MapGet("/local-file", (string path, WorkspaceManager workspace, AgentFileAccess fileAccess, IConfiguration config) =>
@@ -32,9 +37,15 @@ public static class LocalFileEndpoints
                 return Results.BadRequest();
             }
 
-            // Serve a file only if it is under the workspace OR the agent read/wrote it
-            // this thread (each such path was surfaced to — and gated by — the operator).
-            if (!IsUnderAllowedRoot(full, workspace, config) && !fileAccess.Contains(full))
+            // Serve a file if it is under the workspace, the agent read/wrote it this
+            // thread (surfaced to — and for writes gated by — the operator), OR it is an
+            // IMAGE under the OS temp dir. That last case covers the common flow where the
+            // agent downloads a picture via curl/Bash to /tmp (= %TEMP%) — no file_path to
+            // track — then embeds it; limiting it to image extensions keeps the rest of
+            // temp (other apps' scratch files) unreadable.
+            if (!IsUnderAllowedRoot(full, workspace, config)
+                && !fileAccess.Contains(full)
+                && !IsImageUnderTemp(full))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -82,5 +93,24 @@ public static class LocalFileEndpoints
         }
 
         return false;
+    }
+
+    // An image file sitting under the OS temp directory (where git-bash /tmp resolves).
+    private static bool IsImageUnderTemp(string fullPath)
+    {
+        if (!ImageExtensions.Contains(Path.GetExtension(fullPath)))
+        {
+            return false;
+        }
+
+        try
+        {
+            string temp = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+            return fullPath.StartsWith(temp + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 }

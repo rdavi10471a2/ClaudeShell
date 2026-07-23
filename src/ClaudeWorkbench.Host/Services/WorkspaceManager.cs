@@ -1,9 +1,14 @@
 namespace ClaudeWorkbench.Host.Services;
 
-// Where the agent works. In Basic that's just a base folder (its cwd) under
-// %TEMP%\ClaudeShell, with a files/ subfolder for composer attachments. No indexing,
-// no watched project, no governance runtime. Override the base with the "Workspace"
-// config key or the WORKSPACE environment variable.
+// Where the agent works: a base folder (its cwd) with a files/ subfolder for composer
+// attachments. No indexing, no watched project, no governance runtime.
+//
+// The default is an APP-OWNED, provisioned folder under %LOCALAPPDATA%\ClaudeShell\
+// workspace — deliberately NOT the OS temp dir. Temp is shared with every other app and,
+// worse, git-bash maps /tmp to the temp ROOT, so an agent that downloads to /tmp would
+// land outside a temp-based workspace. A dedicated provisioned space is stable, private
+// to this app, and the folder the agent's cwd points at. Override with the "Workspace"
+// config key or the WORKSPACE environment variable (the Launcher sets it per session).
 public sealed class WorkspaceManager
 {
     private readonly object sync = new();
@@ -14,7 +19,10 @@ public sealed class WorkspaceManager
         string? configured = configuration["Workspace"]
             ?? Environment.GetEnvironmentVariable("WORKSPACE");
         basePath = string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(Path.GetTempPath(), "ClaudeShell")
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ClaudeShell",
+                "workspace")
             : configured;
         EnsureDirectories();
     }

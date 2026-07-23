@@ -8,7 +8,7 @@
     of this script's folder, which is correct inside a publish-live.ps1 install.
 
 .PARAMETER Workspace
-    Working directory for Claude. If omitted, the host uses %TEMP%\ClaudeShell.
+    Working directory for Claude. If omitted, the host uses %LOCALAPPDATA%\ClaudeShell\workspace.
 
 .PARAMETER Port
     Host UI port (default 5000).
@@ -44,7 +44,7 @@ if ($Workspace) {
     New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
     Write-Host "  Workspace: $Workspace" -ForegroundColor Gray
 } else {
-    Write-Host "  Workspace: %TEMP%\ClaudeShell (default)" -ForegroundColor Gray
+    Write-Host "  Workspace: %LOCALAPPDATA%\ClaudeShell\workspace (default)" -ForegroundColor Gray
 }
 
 # The host launches and supervises the sidecar itself (from <root>\sidecar).

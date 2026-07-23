@@ -79,7 +79,7 @@ dotnet run --project src/ClaudeWorkbench.Host    # UI on http://localhost:5000
 ```
 
 The host launches and supervises the sidecar itself (skips if one is already on the
-port, kills it on shutdown). The agent works in `%TEMP%\ClaudeShell` by default —
+port, kills it on shutdown). The agent works in `%LOCALAPPDATA%\ClaudeShell\workspace` by default —
 override with the `WORKSPACE` environment variable. Composer attachments land in a
 `files/` subfolder there.
 

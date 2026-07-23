@@ -26,11 +26,11 @@ public partial class Home : IDisposable
         ? $"{Path.GetFileName(Workspace.BasePath.TrimEnd('\\', '/'))} — {AppTitle}"
         : AppTitle;
 
-    // Command-bar auth cue. The Claude dot carries the sidecar-down message too,
-    // because when the sidecar is down its login state is genuinely unknowable — so
-    // the root cause ("Sidecar unavailable") is the honest thing to show there.
+    // Command-bar auth cue. When the sidecar is down, Claude's login state is genuinely
+    // unknowable, so the dot reads "Claude unavailable" (the sidecar is an internal detail
+    // the operator shouldn't have to know); the tooltip explains the connection is down.
     private AuthCue ClaudeCue => !Session.Status.Connected
-        ? new("down", "Sidecar unavailable", "The Claude sidecar is not reachable — no turns can run until it is back.")
+        ? new("down", "Claude unavailable", "Not connected to the Claude engine — no turns can run until it reconnects.")
         : Session.Auth.Claude switch
         {
             true => new("up", "Claude available", "Signed in to the Claude CLI."),
