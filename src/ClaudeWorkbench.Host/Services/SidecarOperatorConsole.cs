@@ -116,11 +116,14 @@ public sealed partial class SidecarOperatorConsole : IOperatorConsole, IApproval
         if (string.Equals(evt.Tool, "Read", StringComparison.OrdinalIgnoreCase))
         {
             string? path = FilePathOf(evt.Input);
-            if (path is not null
-                && ImageExtensions.Contains(Path.GetExtension(path))
-                && FileExists(path))
+            if (path is not null)
             {
-                return new TranscriptEntry(TranscriptKind.Image, path, FormatTime(evt.Ts));
+                // The agent (git-bash) may give a POSIX path; store the Windows form.
+                path = LocalPaths.ToWindows(path);
+                if (ImageExtensions.Contains(Path.GetExtension(path)) && FileExists(path))
+                {
+                    return new TranscriptEntry(TranscriptKind.Image, path, FormatTime(evt.Ts));
+                }
             }
         }
 

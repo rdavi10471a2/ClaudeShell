@@ -105,7 +105,15 @@ public static class MarkdownRenderer
             return Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ? uri.LocalPath : null;
         }
 
-        return LocalPathPattern.IsMatch(url) ? url : null;
+        if (LocalPathPattern.IsMatch(url))
+        {
+            return url;
+        }
+
+        // git-bash POSIX path (/tmp/x, /c/Users/x) — the agent runs under git-bash and
+        // emits these for real local files. Not translating them left the <img> pointing
+        // at http://host/tmp/... (a 404). Real app routes like /about return null here.
+        return LocalPaths.FromPosix(url);
     }
 
     private static bool IsExternalHttp(string? url)

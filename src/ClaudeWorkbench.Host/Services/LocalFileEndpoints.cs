@@ -30,7 +30,9 @@ public static class LocalFileEndpoints
             string full;
             try
             {
-                full = Path.GetFullPath(path);
+                // Accept git-bash POSIX paths too (/tmp/x, /c/Users/x) — Path.GetFullPath
+                // would otherwise resolve /tmp/x to <cwd-drive>:\tmp\x.
+                full = Path.GetFullPath(LocalPaths.ToWindows(path));
             }
             catch (Exception)
             {
