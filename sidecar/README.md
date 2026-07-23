@@ -5,9 +5,11 @@ the **Claude Agent SDK** and streams events back to the Blazor host over SSE.
 
 ## What it does (and deliberately doesn't)
 
-- **Plain Claude.** `systemPrompt: ""` — the shell injects nothing. (Omitting the
-  option would fall back to the CLI's built-in Claude-Code prompt; an explicit string
-  replaces it.) `settingSources: []` — no CLAUDE.md, no `~/.claude` settings leak.
+- **Plain Claude + a display hint.** `systemPrompt` is `DISPLAY_NUDGE` — a short,
+  display-only instruction (show images inline via `![](path)`, diagrams via ```mermaid
+  fences), no persona/tools/governance. An explicit string replaces the CLI's built-in
+  coding prompt, so no coding persona leaks; set it to `""` for a truly empty prompt.
+  `settingSources: []` — no CLAUDE.md, no `~/.claude` settings leak.
 - **All native tools available** — `disallowedTools: []`, no MCP servers, no deny lists.
 - **Writes, commands, and egress ask the operator.** `canUseTool` pauses those at an
   Allow/Deny gate (`gate_request` → operator decision → `gate_resolved`). The

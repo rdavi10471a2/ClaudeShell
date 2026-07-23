@@ -46,9 +46,19 @@ Blazor host (:5000)  ── spawns ──►  BasicSidecar (:6110, Node + Claude
   read straight off the Agent SDK query handle.
 - **Model & reasoning settings** — pick model and effort per thread.
 - **Session continuity** — threads resume across restarts; New Thread starts clean.
-- **Nothing injected** — `systemPrompt: ""`, `settingSources: []`: no CLAUDE.md, no
-  personal settings, no persona. What Claude knows about its environment comes only
-  from its own tool schemas.
+- **Diagrams & code** *(moderately tested)* — a ```mermaid fence renders inline as an
+  SVG (mermaid vendored locally, no CDN, `securityLevel:'strict'`); other code fences get
+  lightweight in-house syntax highlighting (no CDN). The agent must actually emit the
+  fence — there's no auto-diagram fallback the way there is for images.
+- **Security** — model output is untrusted (it can launder file/web content via prompt
+  injection), so the renderer escapes raw HTML (`<script>`/`<iframe>`/`<img onerror>` become
+  text) and downgrades external `<img>` URLs to click-through links; a CDN-free
+  Content-Security-Policy backs it up.
+- **Almost nothing injected** — `settingSources: []` (no CLAUDE.md, no personal settings,
+  no coding persona). The *only* injection is a short **display hint** (`DISPLAY_NUDGE` in
+  `sidecar/basic/index.ts`) telling Claude it's in a chat UI that renders images and
+  mermaid diagrams inline — nothing about tools, workflow, or persona. Set it to `""` for
+  a truly empty prompt.
 
 ## Requirements
 
@@ -123,7 +133,8 @@ engine this shell was factored out of and left with it. The sidecar has
 
 `sidecar/basic/index.ts` is the whole policy surface:
 
-- `systemPrompt` — put your role card here (empty on purpose).
+- `DISPLAY_NUDGE` / `systemPrompt` — the injected prompt. Ships as a display-only hint
+  (images/diagrams inline); replace it with your role card, or set `""` for none.
 - `AUTO_ALLOWED` — the set of tools that skip the gate. It ships with the read-only
   and bookkeeping tools (`Read`/`Grep`/`Glob`/`TodoWrite`/`ToolSearch`); empty it to
   gate literally everything, or add tools (e.g. `Write`) to prompt less.

@@ -37,8 +37,8 @@
         </dl>
 
         <ul class="ab-principles">
-            <li><b>Nothing injected</b> — the system prompt is empty and no CLAUDE.md or personal settings are loaded.</li>
-            <li><b>Everything asks</b> — each tool call pauses at the Allow/Deny gate before it runs.</li>
+            <li><b>Almost nothing injected</b> — no CLAUDE.md or personal settings; the only prompt is a short display hint (images/diagrams render inline), no persona or tools.</li>
+            <li><b>Writes ask</b> — writes, commands, and network calls pause at the Allow/Deny gate; read-only tools run freely.</li>
             <li><b>Blank canvas</b> — fork the sidecar (<code>sidecar/basic/index.ts</code>) to build your own workflow.</li>
         </ul>
 

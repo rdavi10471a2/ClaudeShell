@@ -62,6 +62,30 @@ if (string.Equals(Environment.GetEnvironmentVariable("CWB_EXIT_WITH_BROWSER"), "
 
 var app = builder.Build();
 
+// Content-Security-Policy — defense-in-depth behind MarkdownRenderer (which escapes raw
+// HTML and neutralizes external images in untrusted model output). Tighter than the
+// governed app's: ClaudeShell vendors mermaid locally and has no Monaco/CDN, so nothing
+// off-origin is trusted. 'unsafe-inline'/'unsafe-eval' are for Blazor/Radzen and mermaid;
+// ws: is the SignalR circuit; blob: workers are mermaid's; images are same-origin + data:.
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Append(
+        "Content-Security-Policy",
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data:; " +
+        "font-src 'self' data:; " +
+        "connect-src 'self' ws: wss:; " +
+        "worker-src 'self' blob:; " +
+        "child-src 'self' blob:; " +
+        "object-src 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self'; " +
+        "frame-ancestors 'none'");
+    await next();
+});
+
 app.UseStaticFiles();
 app.UseAntiforgery();
 

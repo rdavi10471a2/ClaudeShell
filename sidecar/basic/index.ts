@@ -28,6 +28,19 @@ const workspaceCwd: string | undefined = process.env.WORKSPACE || undefined;
 // Optional extra read-only directory (operator uploads) granted to the agent.
 const uploadsDir: string | undefined = process.env.UPLOADS_DIR || undefined;
 
+// The ONE thing injected into Claude: a short DISPLAY hint so it uses the chat UI's
+// rendering (images, mermaid diagrams, highlighted code) instead of describing/linking
+// or making artifacts. Deliberately display-only — no persona, no coding-agent framing,
+// no tools, no governance. Set it to "" for a truly empty system prompt (note: omitting
+// systemPrompt entirely would fall back to the CLI's built-in coding prompt, which this
+// explicit string replaces).
+const DISPLAY_NUDGE = [
+  "You are in a chat UI that renders your replies as Markdown — not a terminal. Prefer showing things visually.",
+  "- IMAGES: to show a local image, embed it as Markdown — ![alt](absolute/path) — and it renders inline. An external image URL (http/https) will NOT render inline (it is shown as a plain link for safety), so download it locally first, then embed the local path. When asked to find, get, or show an image, show it inline by default rather than only linking to or describing it. Never say you cannot display images or that you are in a terminal.",
+  "- DIAGRAMS: for any diagram, chart, flowchart, or class/ER/sequence/state diagram — or when asked to draw, diagram, visualize, or sketch something — output a fenced ```mermaid code block containing the diagram source. The app renders it inline as an SVG; a ```mermaid fence IS the finished diagram, so never rasterize it to a PNG/JPG and never fall back to ASCII art.",
+  "- CODE: tag every code fence with its language (```csharp, ```python, ```json) so it is syntax-highlighted.",
+].join("\n");
+
 // Tools that never prompt: agent bookkeeping plus read-only local inspection
 // (Read/Grep/Glob don't mutate anything or reach the network — like the real
 // Claude Code client, only writes, commands, and egress pause at the gate).
@@ -234,11 +247,10 @@ async function ensureSession(policy: ToolPolicy): Promise<void> {
   const options: Options = {
     canUseTool,
     permissionMode: "default",
-    // Empty ON PURPOSE — the shell injects nothing. The SDK spawns the Claude Code
-    // CLI, whose coding-agent prompt is built in; omitting systemPrompt would fall
-    // back to that. An explicit string REPLACES it, and the empty string is the
-    // closest the SDK offers to "no prompt at all". Forks put their role card here.
-    systemPrompt: "",
+    // A short DISPLAY-ONLY hint (see DISPLAY_NUDGE): how to show images and diagrams in
+    // this chat UI. An explicit string REPLACES the CLI's built-in coding-agent prompt,
+    // so no coding persona leaks in — only the rendering guidance. Set to "" for none.
+    systemPrompt: DISPLAY_NUDGE,
     // Operator-selected model + reasoning effort (empty => inherit the default).
     ...(policy.model ? { model: policy.model } : {}),
     ...(EFFORT_LEVELS.has(policy.effort) ? { effort: policy.effort as Options["effort"] } : {}),
