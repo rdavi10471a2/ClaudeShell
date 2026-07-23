@@ -28,8 +28,12 @@ public sealed class MainForm : Form
         public required int HostPort { get; init; }
         public required int SidecarPort { get; init; }
         public Process? Process { get; set; }
+        public Process? Browser { get; set; }
         public string Url => $"http://localhost:{HostPort}";
         public bool Running => Process is { HasExited: false };
+        // Per-session Chrome/Edge profile, so each --app window is its own instance
+        // (own history/cookies) and can be closed independently. Under temp so it's cleanable.
+        public string BrowserProfile => Path.Combine(Path.GetTempPath(), "ClaudeShell", "browser-profiles", Name);
     }
 
     public MainForm()
@@ -173,6 +177,28 @@ public sealed class MainForm : Form
 
     private void Stop(Session session)
     {
+        // Close the session's --app browser window first (Chromium keeps running after the
+        // host dies; the operator would otherwise be left with a dead window).
+        try
+        {
+            if (session.Browser is { HasExited: false } browser)
+            {
+                browser.CloseMainWindow();
+                if (!browser.WaitForExit(1500))
+                {
+                    browser.Kill(entireProcessTree: true);
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // best effort
+        }
+        finally
+        {
+            session.Browser = null;
+        }
+
         try
         {
             if (session.Process is { HasExited: false } process)
@@ -189,17 +215,87 @@ public sealed class MainForm : Form
         {
             session.Process = null;
             DeleteTempWorkspace(session);
+            DeleteBrowserProfile(session);
         }
 
         RefreshRows();
     }
 
+    private static void DeleteBrowserProfile(Session session)
+    {
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(session.BrowserProfile))
+                {
+                    Directory.Delete(session.BrowserProfile, recursive: true);
+                }
+
+                return;
+            }
+            catch (Exception)
+            {
+                Thread.Sleep(400); // the browser may still be releasing profile locks
+            }
+        }
+    }
+
     private void OpenSelected()
     {
-        if (Selected is { } session)
+        if (Selected is not { } session)
+        {
+            return;
+        }
+
+        // Already have a live app window for this session — don't spawn a second.
+        if (session.Browser is { HasExited: false })
+        {
+            return;
+        }
+
+        // Prefer a Chromium browser in --app mode: a distinct, chrome-less window per
+        // session (own profile), opened truly maximized. Falls back to the default
+        // browser (a normal tab) when neither Chrome nor Edge is installed.
+        string? chromium = FindChromium();
+        if (chromium is null)
+        {
+            Process.Start(new ProcessStartInfo(session.Url) { UseShellExecute = true });
+            return;
+        }
+
+        Directory.CreateDirectory(session.BrowserProfile);
+        ProcessStartInfo info = new() { FileName = chromium, UseShellExecute = false };
+        info.ArgumentList.Add($"--app={session.Url}");
+        info.ArgumentList.Add($"--user-data-dir={session.BrowserProfile}");
+        info.ArgumentList.Add("--no-first-run");
+        info.ArgumentList.Add("--no-default-browser-check");
+        // Without this the --app window opens at a default size whose bottom spills behind
+        // the taskbar. Open it truly maximized, respecting the work area.
+        info.ArgumentList.Add("--start-maximized");
+
+        try
+        {
+            session.Browser = Process.Start(info);
+        }
+        catch (Exception)
         {
             Process.Start(new ProcessStartInfo(session.Url) { UseShellExecute = true });
         }
+    }
+
+    // First installed Chrome, then Edge, from the standard per-user/machine locations.
+    private static string? FindChromium()
+    {
+        string[] candidates =
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Google\Chrome\Application\chrome.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Google\Chrome\Application\chrome.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Google\Chrome\Application\chrome.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft\Edge\Application\msedge.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Microsoft\Edge\Application\msedge.exe"),
+        };
+        return candidates.FirstOrDefault(File.Exists);
     }
 
     private void RemoveSelected()
