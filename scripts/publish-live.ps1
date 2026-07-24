@@ -114,29 +114,27 @@ Copy-Item (Join-Path $basicSidecar 'package.json') $sidecarOut -Force
 $lockFile = Join-Path $basicSidecar 'package-lock.json'
 if (Test-Path $lockFile) { Copy-Item $lockFile $sidecarOut -Force }
 
-# Runtime dependencies only (the Agent SDK + express). Falls back to copying the
-# checkout's node_modules when npm cannot reach the registry.
-Write-Host '  installing production dependencies...'
-Push-Location $sidecarOut
-try {
-    if (Test-Path (Join-Path $sidecarOut 'package-lock.json')) {
-        & $npm.Source ci --omit=dev
-    } else {
-        & $npm.Source install --omit=dev
-    }
+# Dependencies: MIRROR the checkout's node_modules instead of reinstalling in the output.
+# `npm ci` here deletes node_modules first, then dies — offline, or on the locked claude.exe
+# of a still-running sidecar — leaving the install gutted (express/SDK gone). robocopy /MIR
+# needs no network and tolerates a locked file (retries briefly, then skips it, keeping the
+# existing good copy). The checkout's node_modules is what the dev sidecar runs on, so it is
+# known-good; shipping the few dev deps with it is a fair trade for a publish that never breaks.
+$checkoutNodeModules = Join-Path $basicSidecar 'node_modules'
+if (-not (Test-Path $checkoutNodeModules)) {
+    throw "Sidecar node_modules missing at $checkoutNodeModules. Run 'npm install' in sidecar\basic first."
 }
-finally {
-    Pop-Location
-}
+Write-Host '  mirroring sidecar dependencies (node_modules)...'
+$robolog = robocopy $checkoutNodeModules (Join-Path $sidecarOut 'node_modules') /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1
+# robocopy exit codes 0-7 are success (bit flags); 8+ is a real failure.
+if ($LASTEXITCODE -ge 8) { throw "Mirroring node_modules failed (robocopy exit $LASTEXITCODE)." }
+$global:LASTEXITCODE = 0
 
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $sidecarOut 'node_modules'))) {
-    Write-Warning 'npm install failed (offline?) - copying the checkout node_modules instead.'
-    $checkoutNodeModules = Join-Path $basicSidecar 'node_modules'
-    if (Test-Path $checkoutNodeModules) {
-        Copy-Item $checkoutNodeModules $sidecarOut -Recurse -Force
-    }
+$haveExpress = Test-Path (Join-Path $sidecarOut 'node_modules\express')
+$haveSdk = Test-Path (Join-Path $sidecarOut 'node_modules\@anthropic-ai\claude-agent-sdk')
+if (-not $haveExpress -or -not $haveSdk) {
+    throw "BasicSidecar publish incomplete: node_modules is missing express or the Agent SDK."
 }
-
 if (-not (Test-Path (Join-Path $sidecarOut 'dist\index.js'))) {
     throw "BasicSidecar publish incomplete: $sidecarOut\dist\index.js is missing."
 }
