@@ -64,9 +64,9 @@ Blazor host (:5000)  ── spawns ──►  BasicSidecar (:6110, Node + Claude
 
 | Requirement | Why |
 |---|---|
-| **.NET 10 SDK** | the Blazor host |
-| **Node.js** (LTS) | the sidecar runs the Claude Agent SDK (Node-only) |
-| **A Claude login** | a subscription login cached by the `claude` CLI is enough — the CLI ships inside the Agent SDK package, no API key needed. **Not signed in anywhere yet?** The Launcher's **Claude sign-in** button is the login path: it opens the CLI's interactive sign-in (using the bundled CLI if none is installed). Skip it if Claude Code or the `claude` CLI is already signed in on this machine. |
+| **[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)** | the Blazor host |
+| **[Node.js](https://nodejs.org/) (LTS)** | the sidecar runs the Claude Agent SDK (Node-only); [npm](https://www.npmjs.com/) ships with it and installs the sidecar's dependencies |
+| **A Claude login** | a subscription login cached by the [`claude` CLI (Claude Code)](https://docs.claude.com/en/docs/claude-code/overview) is enough — the CLI ships inside the Agent SDK package, no API key needed. **Not signed in anywhere yet?** The Launcher's **Claude sign-in** button is one login path: it opens the CLI's interactive sign-in (using the bundled CLI if none is installed). Installing the [**Claude Code extension for VS Code**](https://docs.claude.com/en/docs/claude-code/vs-code) and signing in there works too — the login is cached per machine in `~\.claude` and shared by every session. Skip both if Claude Code or the `claude` CLI is already signed in on this machine. |
 
 ## Run it
 
@@ -82,6 +82,34 @@ The host launches and supervises the sidecar itself (skips if one is already on 
 port, kills it on shutdown). The agent works in `%LOCALAPPDATA%\ClaudeShell\workspace` by default —
 override with the `WORKSPACE` environment variable. Composer attachments land in a
 `files/` subfolder there.
+
+### From VS Code
+
+The repo ships a `.vscode/` config so you can build and debug with **F5**. You need the
+[**C# Dev Kit**](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.csdevkit)
+extension (it pulls in the .NET debugger); Node just needs to be on `PATH`.
+
+1. Open the repo folder in VS Code (`code .` from the repo root).
+2. Press **F5** (or Run ▸ *Run ClaudeShell (host + sidecar)*).
+
+The launch runs a **`build all`** task first — it does `npm install` + `npm run build`
+in `sidecar/basic`, then `dotnet build` on the host — so a fresh clone works on the first
+F5 with no manual setup. When the host reports *"Now listening on…"*, VS Code opens
+http://localhost:5000 in your browser; the host spawns and supervises the sidecar as usual.
+
+What the config provides:
+
+- **`.vscode/launch.json`** — the *Run ClaudeShell (host + sidecar)* launch profile
+  (`ASPNETCORE_URLS=http://localhost:5000`; edit `env` there to change the port).
+- **`.vscode/tasks.json`** — `sidecar: npm install`, `sidecar: build`, `host: build`, and
+  the composite `build all`. Run any of them standalone via *Terminal ▸ Run Task…*.
+
+Subsequent F5s reuse the installed `node_modules`, so they only rebuild what changed.
+
+Not signed in to Claude yet? If you install the
+[**Claude Code extension for VS Code**](https://docs.claude.com/en/docs/claude-code/vs-code)
+and sign in, that caches a machine-wide login in `~\.claude` that ClaudeShell picks up — no
+separate sign-in needed.
 
 ## Multiple sessions
 
@@ -105,6 +133,47 @@ launcher-created temp workspace has its folder **deleted when it stops**, so scr
 sessions leave nothing on disk. The Launcher's **Claude sign-in** button drops a menu
 (sign in / check status / sign out) that runs the CLI's interactive auth in its own
 console — the login is cached per machine and shared by every session.
+
+## Publish a live install
+
+`dotnet run` is for development. To get an **installed, double-clickable ClaudeShell** —
+the host, sidecar, and Launcher side by side with a desktop shortcut — run the publish
+script from the repo root:
+
+```powershell
+.\scripts\publish-live.ps1                          # -> C:\ClaudeShellLive
+.\scripts\publish-live.ps1 -Destination D:\ClaudeShell -Clean
+```
+
+It publishes the host and Launcher (`dotnet publish -c Release`), builds the sidecar with
+[npm](https://www.npmjs.com/), and mirrors the sidecar's `node_modules` into the output.
+The result is a self-contained **install root** that works wherever you move the folder:
+
+```
+<Destination>\            (default C:\ClaudeShellLive)
+    host\        ClaudeWorkbench.Host.exe   — the Blazor app
+    sidecar\     dist\index.js + node_modules — the Claude Agent SDK driver
+    launcher\    ClaudeShell.Launcher.exe   — the multi-session manager
+    scripts\     launch-shell.ps1           — single session, no Launcher
+    ClaudeShell Launcher.lnk                — shortcut (also placed on the Desktop)
+```
+
+The Launcher finds the host at `<root>\host` and the sidecar at `<root>\sidecar`.
+
+**Quick start after publishing:** double-click **ClaudeShell Launcher** (on the Desktop) →
+*New Session* → *Open*. For a single session without the Launcher, run
+`scripts\launch-shell.ps1`. Sessions started on a Launcher-created temp workspace have their
+folder deleted when they stop.
+
+Useful flags: `-Configuration Debug`, `-NoShortcut` (skip the Desktop shortcut; one is still
+written into the install folder), `-Clean` (remove `host\`/`sidecar\`/`launcher\` first).
+
+**Target-machine requirements** (no SDK needed to *run* a published install):
+
+- **[.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0)** (or SDK)
+- **[Node.js](https://nodejs.org/)** on `PATH` — the [`claude` CLI](https://docs.claude.com/en/docs/claude-code/overview)
+  ships inside the sidecar's `node_modules`, so no separate CLI install is needed
+- **A Claude login** in `~\.claude` (use the Launcher's **Claude sign-in** button if not signed in yet)
 
 ## Layout
 

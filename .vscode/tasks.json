@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "sidecar: npm install",
+      "type": "shell",
+      "command": "npm",
+      "args": ["install"],
+      "options": { "cwd": "${workspaceFolder}/sidecar/basic" },
+      "problemMatcher": []
+    },
+    {
+      "label": "sidecar: build",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "options": { "cwd": "${workspaceFolder}/sidecar/basic" },
+      "problemMatcher": [],
+      "dependsOn": ["sidecar: npm install"]
+    },
+    {
+      "label": "host: build",
+      "command": "dotnet",
+      "type": "process",
+      "args": [
+        "build",
+        "${workspaceFolder}/src/ClaudeWorkbench.Host/ClaudeWorkbench.Host.csproj",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "build all",
+      "dependsOrder": "sequence",
+      "dependsOn": ["sidecar: build", "host: build"],
+      "problemMatcher": []
+    }
+  ]
+}
